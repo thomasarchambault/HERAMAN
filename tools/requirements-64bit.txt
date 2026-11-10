@@ -1,0 +1,11 @@
+# HERAMAN tested dependencies. Python 3.10-3.12, Windows x64.
+numpy==1.26.4
+opencv-python==4.11.0.86
+scipy==1.15.3
+scikit-learn==1.7.0
+scikit-image==0.25.2
+matplotlib==3.10.3
+joblib==1.5.1
+PyQt5==5.15.11
+pyqtgraph==0.13.7
+tifffile==2025.5.10

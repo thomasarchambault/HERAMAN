@@ -1,0 +1,70 @@
+# Rôle : Définir les fichiers locaux, données générées et environnements exclus de Git.
+
+# =========================
+# Generated / experimental data
+# =========================
+notebooks/
+sweeps/
+corrected/
+roi_outputs/
+svm_models/
+
+# References / calibration data
+references/
+exposure_table/
+exposures/
+
+# Old / legacy data
+hyperspectral_integration.py
+MSI_GUI_Project_Handbook_and_Troubleshooting_EN_EDITABLE.docx
+
+# Local development and optional data-installation helpers
+tests/
+tools/validate_64bit_architecture.bat
+tools/install_demo_data.bat
+tools/install_demo_data.ps1
+docs/GUIDE_SYNCHRONISATION_GIT.txt
+config/runtime.json
+pathology_workspaces/
+# =========================
+# Python temporary files
+# =========================
+
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Virtual environments
+.venv/
+.venv64/
+venv/
+env/
+
+# =========================
+# IDE / OS
+# =========================
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs / temporary files
+# =========================
+
+*.log
+*.tmp
+synthetic_data/
+
+# Local native ENVI catalogue and analysis outputs
+config/envi_sources.json
+results/
+tmp/
+.venv-heraman/
+config/runtime_64.json.before-install.json
+
+# Local external ENVI inputs and environment files
+data/
+.env
+.env.*

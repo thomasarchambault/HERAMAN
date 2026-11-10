@@ -1,0 +1,5 @@
+﻿{
+    "_comment":  "HERAMAN uses the Python 64-bit interpreter running the GUI. Set python64 only to explicitly select another environment.",
+    "python64":  null,
+    "expected_gui_bits":  64
+}
