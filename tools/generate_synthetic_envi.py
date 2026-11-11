@@ -110,6 +110,6 @@ def generate(root, *, size=1024, populate=True):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1]/'synthetic_data')
+    parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1]/'ENVI files'/'synthetic_data')
     args=parser.parse_args()
     generate(args.output)

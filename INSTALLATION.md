@@ -17,7 +17,7 @@ Copier le dossier HERAMAN **sans les environnements virtuels** `.venv-heraman`, 
 
 Pour conserver vos données et travaux, copier aussi les dossiers utiles :
 
-- `data/` et/ou `synthetic_data/` : paires ENVI `.hdr` + binaire ; conserver leur organisation et le champ `data file` de l'en-tête.
+- `ENVI files/` : un sous-dossier par groupe d'acquisitions, dont `synthetic_data/` pour les données synthétiques et `acquisitions_reelles/` pour les mesures. Conserver les paires ENVI `.hdr` + binaire et le champ `data file` de l'en-tête. Les anciens dossiers `data/` et `synthetic_data/` restent accessibles s'ils existent.
 - `roi_outputs/` : annotations, jeux d'apprentissage et bibliothèques.
 - `svm_models/` : modèles et profils ; conserver les mêmes versions de bibliothèques pour leur relecture.
 - `results/` : classifications et provenance.

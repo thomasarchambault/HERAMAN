@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (
 )
 
 from shared.process_io import utf8_decoder
-from shared.paths import PROJECT_ROOT
+from shared.paths import PROJECT_ROOT, ENVI_FILES_DIR
 from shared.svm_transforms import NORMALIZATION_OPTIONS
 
 from gui.widgets import ResizablePixmapLabel, SpectraInteractive, color_for
@@ -64,10 +64,14 @@ class PostProcessingMixin(PostprocessingModelsMixin):
 
         self.pp_cube_group = QGroupBox("Spectral cube")
         corrected = QVBoxLayout(self.pp_cube_group)
+        corrected.addWidget(QLabel("Acquisition folder"))
+        self.combo_pp_folder = QComboBox()
+        self.combo_pp_folder.setToolTip("Select a subfolder of ENVI files. Refresh detects new folders and cubes.")
+        corrected.addWidget(self.combo_pp_folder)
         cube_header = QHBoxLayout()
         cube_header.addWidget(QLabel("Cube file"), 1)
         self.btn_refresh_pp_cubes = QPushButton("Refresh")
-        self.btn_refresh_pp_cubes.setToolTip("Refresh corrected cubes; preserves the selected file, including external files.")
+        self.btn_refresh_pp_cubes.setToolTip("Refresh acquisition folders and ENVI cubes in the selected folder.")
         cube_header.addWidget(self.btn_refresh_pp_cubes)
         corrected.addLayout(cube_header)
         self.combo_pp_cube = QComboBox()
@@ -141,7 +145,7 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.combo_pp_normalization.activated.connect(self._on_pp_normalization_changed)
         self.combo_pp_model.activated.connect(self._on_pp_profile_changed)
 
-        for combo in (self.combo_pp_cube, self.combo_pp_model, self.combo_pp_classification,
+        for combo in (self.combo_pp_folder, self.combo_pp_cube, self.combo_pp_model, self.combo_pp_classification,
                       self.combo_pp_normalization, self.combo_pp_source):
             combo.setMinimumContentsLength(12)
             combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
@@ -236,6 +240,7 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.btn_refresh_pp_cubes.clicked.connect(self._refresh_pp_cube_choices)
         self.btn_browse_pp_cube.clicked.connect(self._browse_pp_cube)
         self.combo_pp_cube.currentIndexChanged.connect(self._update_pp_cube_path)
+        self.combo_pp_folder.currentIndexChanged.connect(self._on_pp_folder_changed)
         self.combo_pp_source.currentIndexChanged.connect(self._update_pp_source_mode)
         self._refresh_pp_cube_choices()
         self._update_pp_source_mode()
@@ -371,12 +376,39 @@ class PostProcessingMixin(PostprocessingModelsMixin):
     def _refresh_pp_cube_choices(self, _checked=False, selected_path=None):
         selected = str(selected_path or self.combo_pp_cube.currentData() or "")
         from shared.envi_catalog import registered_sources
-        roots = (PROJECT_ROOT/'synthetic_data', PROJECT_ROOT/'data')
-        sources = {str(path.resolve()) for root in roots if root.is_dir() for path in root.rglob('*.hdr')}
-        sources.update(registered_sources())
+        ENVI_FILES_DIR.mkdir(parents=True, exist_ok=True)
+        folders = sorted((p for p in ENVI_FILES_DIR.iterdir() if p.is_dir()),
+                         key=lambda p: p.relative_to(ENVI_FILES_DIR).as_posix().casefold())
+        choices = [(p.relative_to(ENVI_FILES_DIR).as_posix(), str(p.resolve())) for p in folders]
+        # Keep older installations and externally imported cubes accessible.
+        choices.extend((p.name + " (legacy)", str(p.resolve())) for p in
+                       (PROJECT_ROOT/'synthetic_data', PROJECT_ROOT/'data') if p.is_dir())
+        choices.append(("External / imported files", "external"))
+        folder = self.combo_pp_folder.currentData()
+        if selected_path:
+            source = Path(selected_path).resolve()
+            matches = [value for _, value in choices if value != "external" and
+                       source.is_relative_to(Path(value))]
+            folder = max(matches, key=lambda value: len(Path(value).parts), default="external")
+        self.combo_pp_folder.blockSignals(True)
+        self.combo_pp_folder.clear()
+        for label, value in choices:
+            self.combo_pp_folder.addItem(label, value)
+        self.combo_pp_folder.setCurrentIndex(max(0, self.combo_pp_folder.findData(folder)))
+        self.combo_pp_folder.blockSignals(False)
+        folder = self.combo_pp_folder.currentData()
+        self.combo_pp_folder.setToolTip(str(folder))
+        if folder == "external":
+            roots = [Path(value) for _, value in choices if value != "external"]
+            sources = {value for value in registered_sources()
+                       if not any(Path(value).is_relative_to(root) for root in roots)}
+        else:
+            root = Path(folder)
+            candidates = root.rglob('*')
+            sources = {str(p.resolve()) for p in candidates if p.is_file() and p.suffix.lower() == '.hdr'}
         sources = {os.path.normcase(value): value for value in sources}
         paths = sorted(sources.values(), key=lambda value: Path(value).name.casefold())
-        if selected and Path(selected).is_file() and selected not in paths:
+        if folder == "external" and selected_path and Path(selected).is_file() and selected not in paths:
             paths.insert(0, selected)
         self.combo_pp_cube.blockSignals(True)
         self.combo_pp_cube.clear()
@@ -386,9 +418,16 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.combo_pp_cube.blockSignals(False)
         self._update_pp_cube_path()
 
+    def _on_pp_folder_changed(self, _index=0):
+        self._refresh_pp_cube_choices()
+
+    def _envi_browse_directory(self):
+        folder = self.combo_pp_folder.currentData()
+        return str(ENVI_FILES_DIR) if not folder or folder == "external" else folder
+
     def _browse_pp_cube(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Choose an already corrected cube",
-                    str(PROJECT_ROOT / "synthetic_data"), "ENVI cube (*.hdr *.raw *.img *.dat *.bin)")
+        path, _ = QFileDialog.getOpenFileName(self, "Choose an ENVI cube",
+                    self._envi_browse_directory(), "ENVI cube (*.hdr *.raw *.img *.dat *.bin)")
         if path:
             try:
                 path = self._register_cube_source(path)

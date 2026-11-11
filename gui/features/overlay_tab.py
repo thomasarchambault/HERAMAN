@@ -942,10 +942,7 @@ class OverlayMixin:
             if self._ab_tissue_mask is not None and self.ab_show_tissue_mask.isChecked():
                 from shared.tissue_segmentation import draw_dashed_boundary
                 img_bgr = draw_dashed_boundary(img_bgr, self._ab_tissue_mask)
-            if getattr(self, '_data_pixels', None):
-                img_bgr = img_bgr.copy()
-                for px, py in self._data_pixels:
-                    cv2.circle(img_bgr, (px, py), 1, (0, 220, 255), -1)
+            img_bgr = self._draw_data_selection(img_bgr)
             if not getattr(self, "_ab_show_hover_box", True):
                 return img_bgr
             if self._ab_hover_xy is None:
@@ -1303,6 +1300,11 @@ class OverlayMixin:
             else:
                 self._data_cube = None
                 self._data_pixels = []
+                self._data_rois = []
+                self._data_selection_mask = None
+                self._data_draft = []
+                self._data_drag_end = None
+                self._update_data_selection_info()
                 self.data_info.setText('Saved image loaded; spectral cube unavailable.')
             _render()
 
@@ -1388,6 +1390,13 @@ class OverlayMixin:
         class _HoverFilter(QObject):
             def eventFilter(_, obj, event):
                 if obj is self.ab_view_label:
+                    xy = _labelpos_to_imgxy(event.pos()) if event.type() in (
+                        QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                        QEvent.MouseButtonDblClick, QEvent.MouseMove) else None
+                    if event.type() == QEvent.MouseButtonPress:
+                        obj.setFocus()
+                    if self._handle_data_selection_event(event, xy):
+                        return True
                     if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
                         xy = _labelpos_to_imgxy(event.pos())
                         if xy is not None:
@@ -1412,6 +1421,7 @@ class OverlayMixin:
                 return False
 
         self._ab_hover_filter = _HoverFilter(self.ab_view_label)
+        self.ab_view_label.setFocusPolicy(Qt.StrongFocus)
         self.ab_view_label.installEventFilter(self._ab_hover_filter)
 
         # =========================================================

@@ -1,6 +1,6 @@
 """Interactive image inspection and temporary enlargement of existing plots."""
 from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal
-from PyQt5.QtGui import QPainter
+from PyQt5.QtGui import QPainter, QFont, QFontMetrics, QColor, QPen
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QSizePolicy
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from gui.widgets import ResizablePixmapLabel
@@ -106,6 +106,7 @@ class ZoomablePixmapLabel(ResizablePixmapLabel):
         self.zoom = 1.
         self.pan = QPointF()
         self._drag = None
+        self.roi_annotations = []
         self.setToolTip('Wheel: zoom at pointer. Right or middle drag: pan. Fit image: reset. Left click: hold spectrum.')
 
     def setPixmap(self, pixmap):
@@ -166,6 +167,31 @@ class ZoomablePixmapLabel(ResizablePixmapLabel):
         painter.fillRect(self.rect(), self.palette().window())
         painter.setRenderHint(QPainter.SmoothPixmapTransform, self.zoom <= 1.)
         painter.drawPixmap(self.image_rect(), self._orig_pix, QRectF(self._orig_pix.rect()))
+        # Text is drawn after scaling the image, so zoom never enlarges labels.
+        from gui.roi_labels import place_roi_labels, nearest_outline_point
+        image = self.image_rect()
+        sx, sy = image.width()/self._orig_pix.width(), image.height()/self._orig_pix.height()
+        bounds = [QRectF(image.left()+x0*sx, image.top()+y0*sy,
+                         (x1-x0+1)*sx, (y1-y0+1)*sy)
+                  for _, (x0, y0, x1, y1), _ in self.roi_annotations]
+        font = QFont('Arial')
+        font.setPixelSize(12)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
+        sizes = [(metrics.horizontalAdvance(name)+8, metrics.height()+4) for name, _, _ in self.roi_annotations]
+        placements = place_roi_labels(bounds, sizes, QRectF(self.rect()).adjusted(3, 3, -3, -3))
+        painter.setRenderHint(QPainter.Antialiasing)
+        for (name, _, polygon), placement in zip(self.roi_annotations, placements):
+            if placement is None:
+                continue
+            rect, start, end = placement
+            if polygon:
+                points = [(image.left()+(x+.5)*sx, image.top()+(y+.5)*sy) for x, y in polygon]
+                start = nearest_outline_point(points, rect.center())
+            painter.setPen(QPen(QColor('#ffdc50'), 1))
+            painter.drawLine(start, end)
+            painter.fillRect(rect, QColor(25, 25, 25, 210))
+            painter.drawText(rect, Qt.AlignCenter, name)
 
     def wheelEvent(self, event):
         self.zoom_by(1.25 ** (event.angleDelta().y()/120.), event.pos())

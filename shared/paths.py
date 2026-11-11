@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ENVI_FILES_DIR = PROJECT_ROOT / "ENVI files"
 CONFIG_DIR = PROJECT_ROOT / "config"
 PROCESSING_DIR = PROJECT_ROOT / "processing"
 PROCESSING_PIPELINE_DIR = PROCESSING_DIR / "pipeline"

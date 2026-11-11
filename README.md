@@ -29,6 +29,10 @@ Les valeurs restent inchangées : le contraste d'affichage ne modifie jamais les
 
 Les NPZ de ROI, d'export de spectres et de diagnostics regroupent des tableaux et métadonnées ; les modèles utilisent Joblib. Ces fichiers ne sont pas des caches de cubes. `classification_source.json` relie chaque résultat au fichier ENVI d'origine. Garder sa paire `.hdr`/binaire disponible pour réafficher les spectres. Les anciennes cartes NPY doivent être recalculées depuis les sources ENVI.
 
+Pour extraire des spectres, choisir **Pixel**, **Rectangle** ou **Polygon** dans **Extract**. Le rectangle se trace en glissant avec le bouton gauche ; les sommets du polygone se placent par clic gauche et un clic droit ferme la forme, et Échap annule le tracé en cours. Les sélections s'ajoutent sans doublons et **Clear selection** les efface. L'export CSV/NPZ contient le spectre complet de chaque pixel sélectionné et propose le dossier `extracted spectra/` à côté du cube. Le zoom et le déplacement par bouton central restent disponibles pendant le tracé ; le bouton droit permet aussi de déplacer la vue en dehors d’un polygone en cours.
+
+Chaque sélection porte un identifiant `ROI1`, `ROI2`, etc., affiché sur l'image et réinitialisé lors d'un changement de cube ou de **Clear selection**. **Export selected pixels…** ouvre un viewer : les contours et les étiquettes sont cliquables, et la liste permet de comparer toutes les ROI ou d'isoler une ROI avec son spectre moyen et son écart-type. Le bouton **Export CSV / NPZ…** enregistre les pixels uniques avec leur appartenance aux ROI (`roi_ids`, séparés par `;` en cas de chevauchement), ainsi que `*_ROI_positions.csv` (cube, type, nombre de pixels, limites et centre), `*_ROI_mean_spectra.csv` (moyenne et écart-type par bande), `*_ROI_geometry.json` (géométrie) et `*_image_with_ROIs.png` (image avec les ROI uniquement). Les coordonnées sont à base zéro et les limites sont inclusives. Une ROI conserve tous ses pixels, même en cas de chevauchement ; les statistiques ignorent les valeurs non finies bande par bande.
+
 ## Données synthétiques
 
 Exécuter `python tools/generate_synthetic_envi.py`. Trois scènes distinctes de **1024 × 1024 pixels, 121 bandes de 400 à 1000 nm**, sont générées et disponibles dans le sélecteur du GUI :
@@ -37,7 +41,9 @@ Exécuter `python tools/generate_synthetic_envi.py`. Trois scènes distinctes de
 - `scene_02_particles` : particules de tailles variées, contacts et superpositions.
 - `scene_03_layers` : couches ondulées, contour irrégulier et trou dans l'échantillon.
 
-Chaque scène se trouve dans `synthetic_data/<nom>/<nom>.hdr`, avec son binaire ENVI BIP float32, `ground_truth.png` (0 = fond, 1–4 = matériaux A–D) et un manifeste de génération. Les scènes comprennent textures spatiales, gradients d'éclairage, ombres, bruit spectral, mélanges aux frontières et variations entre scènes. Les classes ont une signification artificielle et commune aux trois scènes ; aucune signature ne représente un matériau réel certifié ou une mesure HERA.
+Chaque scène se trouve dans `ENVI files/synthetic_data/<nom>/<nom>.hdr`, avec son binaire ENVI BIP float32, `ground_truth.png` (0 = fond, 1–4 = matériaux A–D) et un manifeste de génération. Les scènes comprennent textures spatiales, gradients d'éclairage, ombres, bruit spectral, mélanges aux frontières et variations entre scènes. Les classes ont une signification artificielle et commune aux trois scènes ; aucune signature ne représente un matériau réel certifié ou une mesure HERA.
+
+Placer les acquisitions réelles dans `ENVI files/acquisitions_reelles/` ou créer d'autres sous-dossiers dans `ENVI files/`. Dans Postprocessing, le menu **Acquisition folder** affiche uniquement les sous-dossiers directs de `ENVI files/`. **Cube file** liste les en-têtes ENVI du dossier choisi, y compris dans ses sous-dossiers. **Refresh** détecte les nouveaux dossiers et fichiers. **Browse cube...** s'ouvre dans le dossier sélectionné ; les fichiers importés hors de cette arborescence restent accessibles via **External / imported files**.
 
 Le générateur est déterministe et réutilise les fichiers intacts. Le relancer ou rouvrir un ENVI ne crée aucun doublon. Les tests utilisent de petites fixtures dans des dossiers de test séparés, sans remplir le sélecteur. Les anciens petits cubes et tous les caches NPY synthétiques ont été supprimés. Le nombre de 121 bandes est un choix de test, pas une contrainte du GUI.
 
@@ -50,3 +56,5 @@ Tests automatisés : lecture BSQ/BIL/BIP, big-endian et offset ; extraction ROI 
 La lecture ENVI est mappée directement sur le binaire ; l'import GUI est synchrone et certaines analyses existantes peuvent encore allouer le cube complet. La composition RGB utilise les bandes les plus proches de 650/550/450 nm ; les longueurs d'onde effectivement utilisées sont affichées. Les statistiques ROI intégrées à cette vue restent à compléter.
 
 Voir `docs/NIREOS_ENVI.md` pour les sources. Les données et modèles locaux existants ont été conservés.
+
+Dans les CSV d’extraction, `cube_name` contient uniquement le nom du fichier ENVI, renseigné sur la première ligne de chaque groupe de cube ; une cellule vide reprend le cube précédent. Le chemin complet reste conservé une seule fois dans les métadonnées JSON (et NPZ).

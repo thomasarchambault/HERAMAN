@@ -773,13 +773,12 @@ class RoiMixin:
 
     def _browse_corrected_file(self):
 
-            # Dossier de départ : ./corrected (ajuste si besoin)
-            start_dir = str(PROJECT_ROOT / "synthetic_data")
+            start_dir = self._envi_browse_directory()
             os.makedirs(start_dir, exist_ok=True)
 
             path, _ = QFileDialog.getOpenFileName(
                 self,
-                "Choisir un fichier dans 'corrected'",
+                "Choisir un cube ENVI",
                 start_dir,
                 "ENVI cubes (*.hdr *.raw *.img *.dat *.bin)"
             )
@@ -792,6 +791,7 @@ class RoiMixin:
                 self.corrected_file_input.setText(path)
                 self.corrected_file_label.setText(os.path.basename(path))
                 self.corrected_cube_path = path
+                self._refresh_pp_cube_choices(selected_path=path)
 
     def _make_roi_tab(self) -> QWidget:
         tab = QWidget()
