@@ -14,3 +14,9 @@ Aucun manuel officiel complet librement téléchargeable trouvé dans cette rech
 ## Implémentation native HERAMAN
 
 Le lecteur utilise directement l'en-tête et le binaire ENVI (lecture seule, aucune conversion NPY). La même représentation H × W × bandes est partagée par la visualisation, les ROI et les SVM. Les images de classification et les masques sont écrits en ENVI BIP avec les noms de classes comme noms de bandes, sans inventer un axe spectral pour ces cartes. Les jeux ROI NPZ et les modèles Joblib restent des enregistrements d'apprentissage distincts des cubes. Les résultats référencent le `.hdr` source dans `classification_source.json` et sont écrits sous `results/`.
+
+## Acquisitions HERA locales examinées le 12 novembre 2026
+
+Les 30 paires de `ENVI files/HERA Acquisitions/` comportent un en-tête `.hdr` et un binaire sans extension (`_raw`, `_ref` ou `_nrm`). Stockage BSQ, float32 (`data type = 4`), little-endian, dimensions 640 × 512 ou 1280 × 1024, 78/156/234 bandes. Le décalage est de 0 ou 80 octets ; toutes les tailles binaires correspondent aux en-têtes.
+
+Les axes non uniformes vont de 400 à 1000 et omettent tous `wavelength units`. Le lecteur accepte ces axes comme des nm si toutes les valeurs sont dans cette plage. Il renseigne `wavelength units` et `heraman wavelength units source` dans les métadonnées retournées uniquement. Une unité explicite reste prioritaire ; les axes hors de cette plage sans unité sont refusés. Aucune valeur spectrale, aucun octet source et aucun en-tête sur disque ne sont modifiés. Ces observations décrivent ces acquisitions locales et ne certifient pas tous les exports NIREOS ni la nature scientifique des valeurs.

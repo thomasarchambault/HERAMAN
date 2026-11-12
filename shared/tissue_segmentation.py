@@ -151,7 +151,9 @@ def intensity_tissue_mask(mean, valid, args):
 def segmentation_band_index(cube_wavelengths, band_nm):
     if band_nm is None:
         return None
-    matches = np.flatnonzero(np.isclose(np.asarray(cube_wavelengths), band_nm, rtol=0, atol=1e-6))
-    if len(matches) != 1:
-        raise ValueError(f"La bande de segmentation {band_nm:g} nm est absente ou ambiguë dans le cube ; choisir une bande disponible ou --segmentation-mean.")
-    return int(matches[0])
+    wavelengths = np.asarray(cube_wavelengths, dtype=np.float64)
+    if (wavelengths.ndim != 1 or not wavelengths.size or
+            not np.isfinite(wavelengths).all() or not np.isfinite(band_nm)):
+        raise ValueError("Axe spectral ou longueur d'onde de segmentation invalide.")
+    # argmin selects the first band on an exact tie; no interpolation.
+    return int(np.argmin(np.abs(wavelengths - band_nm)))

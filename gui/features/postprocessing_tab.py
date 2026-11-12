@@ -163,6 +163,7 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.pp_tissue_band = QDoubleSpinBox()
         self.pp_tissue_band.setRange(400, 1000); self.pp_tissue_band.setDecimals(6); self.pp_tissue_band.setValue(720)
         self.pp_tissue_band.setSuffix(" nm")
+        self.pp_tissue_band.setToolTip("Uses the available cube band nearest to this wavelength; no interpolation.")
         self.combo_pp_segmentation = QComboBox()
         self.combo_pp_segmentation.addItem("Otsu (automatic)", "otsu")
         self.combo_pp_segmentation.addItem("Manual threshold", "threshold")
@@ -301,7 +302,7 @@ class PostProcessingMixin(PostprocessingModelsMixin):
     def _preview_tissue_mask(self):
         from types import SimpleNamespace
         from shared.envi import load_spectral_cube
-        from shared.tissue_segmentation import segment_cube, draw_dashed_boundary
+        from shared.tissue_segmentation import segment_cube, draw_dashed_boundary, segmentation_band_index
         path = Path(str(self.combo_pp_cube.currentData() or ""))
         if not path.is_file():
             QMessageBox.warning(self, "Tissue mask", "Select a corrected cube first.")
@@ -315,6 +316,8 @@ class PostProcessingMixin(PostprocessingModelsMixin):
                 segmentation_threshold=self.pp_tissue_threshold.value(),
                 segmentation_log_intensity=self.cb_pp_log_otsu.isChecked(),
                 tissue_mask_erosion_px=self.pp_tissue_erosion.value())
+            band = segmentation_band_index(wavelengths, args.segmentation_band_nm)
+            actual_band_nm = float(wavelengths[band])
             _, mask, threshold, fallback = segment_cube(cube, wavelengths, args)
             if not mask.any():
                 raise ValueError("Empty mask after erosion. Adjust the threshold or reduce erosion.")
@@ -326,7 +329,6 @@ class PostProcessingMixin(PostprocessingModelsMixin):
                     base = candidate
                     break
             if base is None:
-                band = int(np.flatnonzero(np.isclose(wavelengths, args.segmentation_band_nm))[0])
                 intensity = np.asarray(cube[:, :, band], dtype=np.float32)
                 low, high = np.nanpercentile(intensity, [1, 99])
                 gray = np.nan_to_num(np.clip((intensity-low)/max(float(high-low), 1e-6), 0, 1))*255
@@ -345,7 +347,7 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         dialog = QDialog(self)
         dialog.setWindowTitle("Tissue mask preview - no classification")
         layout = QVBoxLayout(dialog)
-        details = QLabel(f"{path.name}\n{args.segmentation_band_nm:g} nm | {args.segmentation_method} | threshold={threshold:.5g} | erosion={args.tissue_mask_erosion_px}px\n"
+        details = QLabel(f"{path.name}\n{actual_band_nm:g} nm (requested: {args.segmentation_band_nm:g} nm) | {args.segmentation_method} | threshold={threshold:.5g} | erosion={args.tissue_mask_erosion_px}px\n"
                          f"Retained: {int(mask.sum()):,}/{mask.size:,} pixels. Dashed cyan: boundary after erosion.")
         details.setWordWrap(True)
         layout.addWidget(details)

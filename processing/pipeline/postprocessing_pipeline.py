@@ -10,7 +10,7 @@ from shared.paths import PROJECT_ROOT, portable_project_path
 from shared.cube_preview import save_rgb_from_cube
 from shared.envi import load_spectral_cube, resolve_envi_header, resolve_envi_binary, read_envi, write_envi
 from shared.corrected_layout import prepare_classification_folder
-from shared.tissue_segmentation import segment_cube
+from shared.tissue_segmentation import segment_cube, segmentation_band_index
 from processing.pipeline.svm_classifier import unmix_from_cube
 
 
@@ -41,7 +41,8 @@ def classify_envi(args):
             write_envi(result_dir/'tissue_mask.hdr',mask,band_names=['sample_mask'])
             write_image(str(result_dir/'background_mask.png'),mask.astype(np.uint8)*255)
             (result_dir/'tissue_mask_settings.json').write_text(json.dumps(dict(
-                band_nm=args.segmentation_band_nm,method=args.segmentation_method,threshold=float(threshold),
+                band_nm=float(wavelengths[segmentation_band_index(wavelengths, args.segmentation_band_nm)]),
+                requested_band_nm=args.segmentation_band_nm,method=args.segmentation_method,threshold=float(threshold),
                 log_intensity=args.segmentation_log_intensity,erosion_px=args.tissue_mask_erosion_px,
                 frame_fallback=bool(fallback)),indent=2),encoding='utf-8')
         print('[3/3] SVM classification from the ENVI-mapped array',flush=True)

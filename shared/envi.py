@@ -38,13 +38,20 @@ def read_envi(path, *, require_wavelengths=True):
     dtype = np.dtype(TYPES[code]).newbyteorder('>' if order else '<')
     wl = np.asarray([float(v) for v in fields.get('wavelength','').split(',') if v.strip()], dtype=np.float64)
     if wl.size or require_wavelengths:
+        if len(wl)!=n or not np.isfinite(wl).all() or len(np.unique(wl))!=n:
+            raise ValueError('Missing, duplicate or invalid ENVI wavelengths.')
         unit = fields.get('wavelength units','').lower()
+        # HERA acquisition headers omit units for their 400-1000 nm axis.
+        # Keep the fallback bounded to the observed VNIR range; other axes
+        # still need an explicit unit rather than a magnitude-based guess.
+        if not unit and np.all((wl >= 400) & (wl <= 1000)):
+            unit = 'nm'
+            fields['wavelength units'] = 'Nanometers'
+            fields['heraman wavelength units source'] = 'inferred HERA VNIR range (400-1000 nm)'
         if unit in ('micrometers','micrometer','microns','um','µm'):
             wl *= 1000
         elif unit not in ('nanometers','nanometer','nm'):
             raise ValueError('Explicit wavelength units (nm or micrometers) required.')
-        if len(wl)!=n or not np.isfinite(wl).all() or len(np.unique(wl))!=n:
-            raise ValueError('Missing, duplicate or invalid ENVI wavelengths.')
     else:
         wl = None
     binary = resolve_envi_binary(header, fields)

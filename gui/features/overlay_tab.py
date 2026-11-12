@@ -364,9 +364,12 @@ class OverlayMixin:
         self.ab_hover_label.setTextFormat(Qt.PlainText)
         self.cb_ab_fixed_axes = QCheckBox("Fix axes to cube scale")
         self.cb_ab_fixed_axes.setToolTip(
-            "Use the same signal scale across the cube."
+            "Checked: use the same signal scale across the cube to compare pixels.\n"
+            "The native signal axis is capped at 2; values above 2 are outside the plot.\n"
+            "Unchecked: fit the vertical axis to the displayed spectrum and visible class reference.\n"
+            "Only the display scale changes; spectral values are preserved."
         )
-        self.cb_ab_fixed_axes.setChecked(True)
+        self.cb_ab_fixed_axes.setChecked(False)
         right.addWidget(self.cb_ab_fixed_axes, 0)
         right.addWidget(self.ab_hover_label, 0)
 
@@ -901,11 +904,15 @@ class OverlayMixin:
                         lo, hi = float(np.nanmin(all_bounds)), float(np.nanmax(all_bounds))
                     else:
                         lo, hi = self._ab_spectrum_limits
+                        hi = min(hi, 2.0)
                 # Cap before padding so extreme values cannot inflate the padding.
                 if lo >= hi:
                     lo = min(0.0, hi - 1.0)
                 pad = max((hi-lo)*.06, abs(hi)*.01, 1e-6)
-                ax.set_ylim(lo-pad, hi+pad)
+                upper = hi + pad
+                if self.cb_ab_fixed_axes.isChecked() and not normalized:
+                    upper = min(upper, 2.0)
+                ax.set_ylim(lo-pad, upper)
             handles = [self._ab_spec_line]
             if self._ab_ref_band is not None:
                 handles.extend([self._ab_ref_line, self._ab_ref_band])
