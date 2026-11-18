@@ -1,4 +1,4 @@
-# Rôle : Définir les fichiers locaux, données générées et environnements exclus de Git.
+# Local files, generated data, and environments excluded from Git.
 
 # =========================
 # Generated / experimental data
@@ -8,6 +8,7 @@ sweeps/
 corrected/
 roi_outputs/
 svm_models/
+extracted spectra/
 
 # References / calibration data
 references/
@@ -20,6 +21,7 @@ MSI_GUI_Project_Handbook_and_Troubleshooting_EN_EDITABLE.docx
 
 # Local development and optional data-installation helpers
 tests/
+.pytest_cache/
 tools/validate_64bit_architecture.bat
 tools/install_demo_data.bat
 tools/install_demo_data.ps1

@@ -3,10 +3,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QEvent
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSlider, QFileDialog, QMessageBox, QComboBox, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSlider, QFileDialog, QMessageBox, QComboBox, QSizePolicy, QInputDialog
 from shared.envi import load_spectral_cube
 from shared.cube_preview import make_rgb_preview, stretch_display_band
 from shared.envi_catalog import register_envi_source
+from shared.paths import ENVI_FILES_DIR
 
 
 class DataMixin:
@@ -54,8 +55,12 @@ class DataMixin:
         row.addWidget(self.data_selection_info, 1)
         export = QPushButton('Export selected pixels…')
         export.clicked.connect(self._export_data_pixels)
+        load = QPushButton('Load ROIs…')
+        load.setToolTip('Choose the cube folder to find its exported ROIs and open their source cube.')
+        load.clicked.connect(self._import_data_rois)
         clear = QPushButton('Clear selection')
         clear.clicked.connect(self._clear_data_pixels)
+        row.addWidget(load)
         row.addWidget(export)
         row.addWidget(clear)
         layout.addLayout(row)
@@ -155,7 +160,11 @@ class DataMixin:
         self._render_spectral_image()
 
     def _register_data_roi(self, shape, vertices, coordinates):
-        self._data_rois.append(dict(id=f'ROI{len(self._data_rois)+1}', shape=shape,
+        existing = {roi['id'] for roi in self._data_rois}
+        number = len(existing) + 1
+        while f'ROI{number}' in existing:
+            number += 1
+        self._data_rois.append(dict(id=f'ROI{number}', shape=shape,
                                    vertices_xy=np.asarray(vertices).tolist(), coordinates_xy=coordinates))
 
     def _finish_data_polygon(self):
@@ -216,6 +225,12 @@ class DataMixin:
                 cv2.polylines(image, [points], True, (0, 220, 255), 1)
             elif roi['shape'] == 'rectangle':
                 cv2.rectangle(image, tuple(points[0]), tuple(points[1]), (0, 220, 255), 1)
+            elif roi['shape'] == 'mask':
+                region = np.zeros(image.shape[:2], np.uint8)
+                xy = roi['coordinates_xy']
+                region[xy[:, 1], xy[:, 0]] = 1
+                contours, _ = cv2.findContours(region, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+                cv2.drawContours(image, contours, -1, (0, 220, 255), 1)
             xy = roi['coordinates_xy']
             self.ab_view_label.roi_annotations.append(
                 (roi['id'], (*xy.min(axis=0), *xy.max(axis=0)),
@@ -245,6 +260,76 @@ class DataMixin:
         coordinates = np.asarray(self._data_pixels, dtype=np.int64)
         return write_selection(path, self._data_cube, self._data_wavelengths, self._data_path,
                                coordinates, self._data_rois)
+
+    def _read_data_rois(self, path):
+        from shared.spectra_import import read_selection
+        if self._data_cube is None:
+            raise ValueError('Open the source cube before loading ROIs.')
+        return read_selection(path, self._data_path, self._data_cube.shape, self._data_wavelengths)
+
+    def _restore_data_rois(self, coordinates, rois):
+        self._data_pixels = [tuple(xy) for xy in coordinates.tolist()]
+        self._data_rois = rois
+        self._data_selection_mask = np.zeros(self._data_cube.shape[:2], dtype=bool)
+        self._data_selection_mask[coordinates[:, 1], coordinates[:, 0]] = True
+        self._data_draft = []
+        self._data_drag_end = None
+        self._update_data_selection_info()
+        self._render_spectral_image()
+
+    def _import_data_rois(self):
+        selected_folder = QFileDialog.getExistingDirectory(self, 'Choose cube folder — load ROIs', str(ENVI_FILES_DIR))
+        if not selected_folder:
+            return
+        folder = Path(selected_folder)
+        try:
+            from shared.spectra_import import find_selections, selection_source, locate_source, read_selection
+            from shared.envi_catalog import registered_sources
+            exports = find_selections(folder)
+            if not exports:
+                raise ValueError('No exported ROIs found in this folder or its extracted spectra subfolder.')
+            path = exports[0]
+            if len(exports) > 1:
+                labels = [str(item.relative_to(folder.resolve())) for item in exports]
+                choice, accepted = QInputDialog.getItem(
+                    self, 'Load ROIs', 'Several ROI exports found — choose a selection (newest first):', labels, 0, False)
+                if not accepted:
+                    return
+                path = exports[labels.index(choice)]
+            pixel_path, source = selection_source(path)
+            known = registered_sources()
+            if getattr(self, '_data_path', ''):
+                known.append(self._data_path)
+            adjacent = folder / Path(source.replace('\\', '/')).name
+            cube_path = adjacent.resolve() if adjacent.is_file() else locate_source(pixel_path, source, known)
+            if cube_path is None:
+                selected, _ = QFileDialog.getOpenFileName(
+                    self, f'Locate source cube: {Path(source).name}', str(pixel_path.parent), 'ENVI header (*.hdr)')
+                if not selected:
+                    return
+                cube_path = Path(selected).resolve()
+            # Validate against the associated cube before replacing the displayed cube or selection.
+            cube, wavelengths = load_spectral_cube(cube_path)
+            try:
+                coordinates, rois = read_selection(pixel_path, cube_path, cube.shape, wavelengths)
+            finally:
+                mapping = getattr(cube, '_mmap', None)
+                if mapping is not None:
+                    mapping.close()
+        except Exception as exc:
+            QMessageBox.warning(self, 'Load ROIs', str(exc))
+            return
+        if self._data_rois and QMessageBox.question(
+                self, 'Load ROIs', 'Replace the current selection with the loaded ROIs?',
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        if str(cube_path) != getattr(self, '_data_path', None):
+            try:
+                self._load_data_cube(cube_path)
+            except Exception as exc:
+                QMessageBox.warning(self, 'Load ROIs', str(exc))
+                return
+        self._restore_data_rois(coordinates, rois)
 
     def _export_data_pixels(self):
         if not self._data_pixels:

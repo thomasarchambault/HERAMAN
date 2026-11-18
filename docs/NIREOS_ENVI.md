@@ -1,22 +1,21 @@
-# Export NIREOS et fixtures ENVI
+# NIREOS exports and ENVI fixtures
 
-Sources consultées le 10 novembre 2026 :
+Sources consulted on November 10, 2026:
 
-- https://nireos.com/hera-software/ : HERA Acquisition App sauvegarde en ENVI ; HyperLAB importe des cubes ENVI et fournit analyse/export.
-- https://nireos.com/faq/ : export ENVI décrit comme binaire plat avec en-tête ASCII, ou MATLAB ; jeux de données sur demande auprès de NIREOS.
-- https://nireos.com/product/hera-vnir/ : acquisition, analyse et export standard ; calcul de réflectance dans HyperLAB.
-- https://www.nv5geospatialsoftware.com/docs/ENVIHeaderFiles.html : spécification des dimensions, types, interleave, offset, byte order, wavelength et unités.
-- https://www.nv5geospatialsoftware.com/docs/enviimagefiles.html : stockage BSQ/BIL/BIP.
+- [HERA software](https://nireos.com/hera-software/): the HERA Acquisition App saves in ENVI format; HyperLAB imports ENVI cubes and provides analysis and export tools.
+- [NIREOS FAQ](https://nireos.com/faq/): ENVI export is described as a flat binary with an ASCII header, with MATLAB as another option; datasets are available from NIREOS on request.
+- [HERA VNIR](https://nireos.com/product/hera-vnir/): acquisition, analysis, and standard export; reflectance calculation in HyperLAB.
+- [ENVI header files](https://www.nv5geospatialsoftware.com/docs/ENVIHeaderFiles.html): specifications for dimensions, data types, interleave, offset, byte order, wavelengths, and units.
+- [ENVI image files](https://www.nv5geospatialsoftware.com/docs/enviimagefiles.html): BSQ/BIL/BIP storage.
 
-Aucun manuel officiel complet librement téléchargeable trouvé dans cette recherche. Une copie tierce d'un manuel a été repérée, mais n'a pas servi de spécification technique. Il reste donc à confirmer sur un vrai export NIREOS le nom du binaire, les champs présents, les unités et la nature scientifique des valeurs. Les fixtures générées sont des fichiers ENVI standards, pas une reproduction certifiée des sorties NIREOS. Aucune grille spectrale uniforme HERA n'est supposée par le lecteur.
+No complete, freely downloadable official manual was found during that search. A third-party copy of a manual was identified but was not used as a technical specification. At that stage, binary filenames, available fields, units, and the scientific meaning of values still needed to be confirmed against real NIREOS exports. The generated fixtures are standard ENVI files, not certified reproductions of NIREOS outputs. The reader does not assume a uniform HERA spectral grid.
 
+## Native HERAMAN implementation
 
-## Implémentation native HERAMAN
+The reader uses the ENVI header and binary directly (read-only, without NPY conversion). Visualization, ROIs, and SVMs share the same H × W × bands representation. Classification images and masks are written as ENVI BIP with class names as band names, without assigning a spectral axis to these maps. ROI NPZ datasets and Joblib models remain training records separate from the cubes. Outputs reference the source `.hdr` in `classification_source.json` and are stored under `results/`.
 
-Le lecteur utilise directement l'en-tête et le binaire ENVI (lecture seule, aucune conversion NPY). La même représentation H × W × bandes est partagée par la visualisation, les ROI et les SVM. Les images de classification et les masques sont écrits en ENVI BIP avec les noms de classes comme noms de bandes, sans inventer un axe spectral pour ces cartes. Les jeux ROI NPZ et les modèles Joblib restent des enregistrements d'apprentissage distincts des cubes. Les résultats référencent le `.hdr` source dans `classification_source.json` et sont écrits sous `results/`.
+## Local HERA acquisitions examined on November 12, 2026
 
-## Acquisitions HERA locales examinées le 12 novembre 2026
+The 30 pairs in `ENVI files/HERA Acquisitions/` contain a `.hdr` header and an extensionless binary (`_raw`, `_ref`, or `_nrm`). They use BSQ storage, float32 (`data type = 4`), little-endian byte order, dimensions of 640 × 512 or 1280 × 1024, and 78/156/234 bands. The offset is 0 or 80 bytes; all binary sizes match their headers.
 
-Les 30 paires de `ENVI files/HERA Acquisitions/` comportent un en-tête `.hdr` et un binaire sans extension (`_raw`, `_ref` ou `_nrm`). Stockage BSQ, float32 (`data type = 4`), little-endian, dimensions 640 × 512 ou 1280 × 1024, 78/156/234 bandes. Le décalage est de 0 ou 80 octets ; toutes les tailles binaires correspondent aux en-têtes.
-
-Les axes non uniformes vont de 400 à 1000 et omettent tous `wavelength units`. Le lecteur accepte ces axes comme des nm si toutes les valeurs sont dans cette plage. Il renseigne `wavelength units` et `heraman wavelength units source` dans les métadonnées retournées uniquement. Une unité explicite reste prioritaire ; les axes hors de cette plage sans unité sont refusés. Aucune valeur spectrale, aucun octet source et aucun en-tête sur disque ne sont modifiés. Ces observations décrivent ces acquisitions locales et ne certifient pas tous les exports NIREOS ni la nature scientifique des valeurs.
+Their nonuniform axes span 400 to 1000, and all omit `wavelength units`. The reader accepts these axes as nm when every value falls within that range. It fills in `wavelength units` and `heraman wavelength units source` only in the returned metadata. Explicit units take precedence; axes outside this range without units are rejected. No spectral values, source bytes, or headers on disk are modified. These observations describe those local acquisitions and do not certify all NIREOS exports or the scientific meaning of their values.

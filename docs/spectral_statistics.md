@@ -1,4 +1,4 @@
-<!-- Rôle : Décrire la méthodologie, les unités et les limites de l’analyse statistique spectrale. -->
+<!-- Purpose: Describe the methodology, units, and limitations of spectral statistical analysis. -->
 
 # Spectral separation analysis
 

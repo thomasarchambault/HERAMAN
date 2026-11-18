@@ -5,6 +5,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Rectangle
 from matplotlib.font_manager import FontProperties
+from matplotlib.colors import to_rgba
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from PyQt5.QtCore import Qt, QRectF
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox
@@ -67,6 +68,8 @@ class SpectraExportViewer(QDialog):
         for index, r in enumerate(self.summaries):
             color = f'C{index % 10}'
             active = chosen == -1 or chosen == index
+            if r['shape'] == 'mask':
+                self._draw_mask(self.image_ax, r, color, .35 if active else .1)
             points = np.asarray(r['vertices_xy'])
             if r['shape'] == 'polygon':
                 patch = Polygon(points, closed=True, fill=False)
@@ -107,6 +110,8 @@ class SpectraExportViewer(QDialog):
         axes.imshow(self.image)
         patches = []
         for index, roi in enumerate(self.summaries):
+            if roi['shape'] == 'mask':
+                self._draw_mask(axes, roi, f'C{index % 10}', .35)
             if roi['shape'] == 'polygon':
                 patch = Polygon(roi['vertices_xy'], closed=True, fill=False)
             else:
@@ -130,6 +135,12 @@ class SpectraExportViewer(QDialog):
             if temporary.exists():
                 temporary.unlink()
         figure.clear()
+
+    def _draw_mask(self, axes, roi, color, alpha):
+        overlay = np.zeros((*self.image.shape[:2], 4), dtype=np.float32)
+        xy = roi['coordinates_xy']
+        overlay[xy[:, 1], xy[:, 0]] = to_rgba(color, alpha)
+        axes.imshow(overlay)
 
 
 def add_roi_labels(axes, canvas, summaries, patches):

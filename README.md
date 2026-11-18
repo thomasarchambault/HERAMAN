@@ -1,60 +1,93 @@
 # HERAMAN
 
-Application Python 64 bits pour explorer et classifier des cubes spectraux HERA déjà reconstruits et corrigés en amont. Aucun pilote de caméra ou filtre n'est nécessaire.
+**A graphical interface for exploring, annotating, and classifying HERA hyperspectral images.**
 
-## Démarrage
+HERAMAN supports the analysis of reconstructed and corrected spectral cubes, from inspecting images and spectra to generating classification maps. It brings visualization, region selection, and model training together in a Python application.
 
-Lancer `HERAMAN LAUNCHER.bat`, ou `python -m gui.main` depuis ce dossier. Pour créer l’environnement dédié : **INSTALL HERAMAN.bat**. Voir [INSTALLATION.md](INSTALLATION.md) pour installer, diagnostiquer et transférer le projet.
+The project works directly with **ENVI** files and can analyze acquisitions without the camera or its drivers. Acquisition reconstruction and correction take place upstream, outside HERAMAN.
 
-Par défaut, les traitements ROI/SVM et les contrôles de modèles utilisent le Python 64 bits qui exécute le GUI. `config/runtime_64.json` utilise `python64: null` pour cette sélection automatique ; un ancien chemin de venv absent revient à cet interpréteur actif. Un chemin existant dans la configuration ou la variable explicite `MSI_PYTHON64` peut sélectionner un autre Python, dont l'architecture 64 bits est vérifiée. Un override explicite inexistant produit une erreur claire. Le lanceur `tools/run_gui.py` suit la même règle.
+## What HERAMAN can do
 
-## Parcours
+- **Explore a cube**: display an RGB composite or a spectral band, navigate the image, and inspect pixel spectra.
+- **Extract regions of interest (ROIs)**: select pixels, rectangles, or polygons, compare their spectra, and export the data. Exported selections can be reloaded on their source cube.
+- **Build a training dataset**: define classes and organize annotations into separate profiles.
+- **Train and apply SVM models**: compare linear and RBF kernels, with optional probability calibration, then classify other compatible cubes.
+- **Inspect results**: overlay class maps on the image, examine probabilities when available, and use intensity segmentation to restrict analysis to the sample.
 
-- Visualisation : ouvrir un cube ENVI sans modèle, afficher une bande ou une composition RGB dans le viewer existant de Postprocessing. Le survol trace les spectres à droite ; le clic fige le spectre et sélectionne le pixel pour l'export CSV/NPZ. La classification ajoute les classes en overlay sur cette même image, avec opacité, zoom et déplacement. Aucun sous-onglet ou second display.
-- ROI selection : créer un profil nommé par projet/type d'échantillon, définir ses classes et constituer son jeu d'entraînement. Chaque lancement génère automatiquement un RGB natif à partir des bandes les plus proches de 650/550/450 nm et l'affiche en premier dans la fenêtre de sélection. L'aperçu PNG et sa provenance sont conservés sous `roi_outputs/previews/<source>_<identifiant>/`, au même emplacement à chaque lancement. Aucun RGB préalable n'est nécessaire et les valeurs ENVI restent inchangées. Chaque profil conserve ses propres données et modèles.
-- SVM Models : examiner et réentraîner les modèles Linear/RBF. L'option Enable Platt scaling calibre toutes les classes à partir de scores obtenus sur des cubes exclus de l'entraînement. Elle est également disponible dans ROI selection pour les nouveaux modèles. Un modèle enregistré conserve sa calibration ; modifier l'option nécessite de le réentraîner. Une calibration impossible est signalée explicitement.
-- Segmentation Tool : segmentation d'intensité optionnelle de l'échantillon, avec aperçu sans classification. Le masque restreint les pixels à classifier, sans modifier les classes ou le jeu d'entraînement.
+## Quick start
 
-Les contrôles P(fat)/non-fat et les règles de classification spécifiques à la graisse sont retirés du parcours HERAMAN. Les nouveaux modèles utilisent les décisions SVM brutes ou l'argmax des probabilités calibrées pour toutes les classes. Les anciennes variantes MARGIN sont conservées sur disque mais doivent être réentraînées pour le protocole générique HERAMAN.
+HERAMAN targets **Windows x64**, with **64-bit Python 3.10 to 3.12**. An Internet connection is required to install dependencies.
 
-Les exports de pixels incluent les coordonnées (x, y), avec origine à zéro, l'axe spectral en nm et les valeurs importées sans transformation d'affichage. CSV : une ligne par pixel ; NPZ : `coordinates_xy`, `spectra`, `wavelengths`, `cube_path`, `coordinate_origin`.
+1. Download or clone the repository into a writable folder.
+2. Install Python x64 if needed, then run **`INSTALL HERAMAN.bat`**. The script creates the local `.venv-heraman` environment and installs the project dependencies.
+3. Open the application with **`HERAMAN LAUNCHER.bat`**.
+4. Place acquisitions in a subfolder of `ENVI files/`, then select a cube in the **Visualisation** tab.
 
-## Import
+Keep each `.hdr` header together with its ENVI binary file. Data and trained models are not included in the repository.
 
-ENVI BSQ/BIL/BIP, types numériques réels, little/big-endian et header offset. Sélectionner l'en-tête `.hdr`, avec son binaire à proximité. `data file` est respecté ; sinon un binaire non ambigu est recherché. L'axe wavelength est obligatoire. Pour les acquisitions HERA sans champ `wavelength units`, un axe entièrement compris entre 400 et 1000 est interprété en nm ; cette inférence est indiquée dans les métadonnées retournées, sans modifier les fichiers sources. Les autres axes sans unité nécessitent une unité explicite. Les micromètres sont convertis en nm et les bandes sont ordonnées par longueur d'onde.
+For installation details, troubleshooting, or moving the project to another computer, see the [installation guide](INSTALLATION.md).
 
-Les fichiers ENVI sont le format natif des cubes : visualisation, ROI, segmentation et SVM lisent directement le `.raw` associé au `.hdr`, avec accès mémoire mappé en lecture seule. Sélectionner le `.hdr` ou son binaire sans extension ou `.raw`/`.img`/`.dat`/`.bin` ; le GUI mémorise uniquement le chemin de l'en-tête dans `config/envi_sources.json`. Aucune conversion NPY ou copie complète du cube n'est créée. Les entrées NPY/NPZ héritées de MARGIN ne sont plus proposées comme cubes.
+## Analysis workflow
 
-Les valeurs restent inchangées : le contraste d'affichage ne modifie jamais les spectres. Les résultats sont séparés des sources dans `results/<source>_<identifiant>/classification/` : cartes de classes `abundances.hdr/.raw`, probabilités calibrées `class_probabilities.hdr/.raw` si Platt est actif, et masque d'échantillon `tissue_mask.hdr/.raw` si la segmentation est active. Les bandes de ces cartes représentent des classes, pas des longueurs d'onde. Les images PNG restent des aperçus.
+**Visualisation** is the entry point for opening a cube, inspecting its contents, and extracting spectra. Acquisition folders organize the cubes to explore; selection tools let you save ROIs and their spectral statistics.
 
-Les NPZ de ROI, d'export de spectres et de diagnostics regroupent des tableaux et métadonnées ; les modèles utilisent Joblib. Ces fichiers ne sont pas des caches de cubes. `classification_source.json` relie chaque résultat au fichier ENVI d'origine. Garder sa paire `.hdr`/binaire disponible pour réafficher les spectres. Les anciennes cartes NPY doivent être recalculées depuis les sources ENVI.
+**ROI selection** builds a training dataset from regions annotated by class. Each profile keeps its own dataset, spectral library, and associated models.
 
-Pour extraire des spectres, choisir **Pixel**, **Rectangle** ou **Polygon** dans **Extract**. Le rectangle se trace en glissant avec le bouton gauche ; les sommets du polygone se placent par clic gauche et un clic droit ferme la forme, et Échap annule le tracé en cours. Les sélections s'ajoutent sans doublons et **Clear selection** les efface. L'export CSV/NPZ contient le spectre complet de chaque pixel sélectionné et propose le dossier `extracted spectra/` à côté du cube. Le zoom et le déplacement par bouton central restent disponibles pendant le tracé ; le bouton droit permet aussi de déplacer la vue en dehors d’un polygone en cours.
+**SVM Models** provides tools for inspecting and retraining models. Models can then be applied from **Visualisation**, with optional sample segmentation. The resulting maps are displayed over the image and saved separately from the source data.
 
-Chaque sélection porte un identifiant `ROI1`, `ROI2`, etc., affiché sur l'image et réinitialisé lors d'un changement de cube ou de **Clear selection**. **Export selected pixels…** ouvre un viewer : les contours et les étiquettes sont cliquables, et la liste permet de comparer toutes les ROI ou d'isoler une ROI avec son spectre moyen et son écart-type. Le bouton **Export CSV / NPZ…** enregistre les pixels uniques avec leur appartenance aux ROI (`roi_ids`, séparés par `;` en cas de chevauchement), ainsi que `*_ROI_positions.csv` (cube, type, nombre de pixels, limites et centre), `*_ROI_mean_spectra.csv` (moyenne et écart-type par bande), `*_ROI_geometry.json` (géométrie) et `*_image_with_ROIs.png` (image avec les ROI uniquement). Les coordonnées sont à base zéro et les limites sont inclusives. Une ROI conserve tous ses pixels, même en cas de chevauchement ; les statistiques ignorent les valeurs non finies bande par bande.
+To restore an exported selection, click **Load ROIs…** and choose **the cube folder**. The GUI searches that folder and `extracted spectra/` for exports, then opens the associated cube. If multiple selections are available, a list lets you choose which one to restore. See the [ROI export and reload guide](docs/ROI_EXPORTS.md).
 
-## Données synthétiques
+## Data and outputs
 
-Exécuter `python tools/generate_synthetic_envi.py`. Trois scènes distinctes de **1024 × 1024 pixels, 121 bandes de 400 à 1000 nm**, sont générées et disponibles dans le sélecteur du GUI :
+Cubes are read in ENVI format with their spectral axis. **BSQ, BIL, and BIP** layouts are supported. Source values are preserved: contrast settings affect the display, while spectral normalization, when selected, is applied during processing.
 
-- `scene_01_mosaic` : mosaïque de quatre matériaux dans une forme elliptique.
-- `scene_02_particles` : particules de tailles variées, contacts et superpositions.
-- `scene_03_layers` : couches ondulées, contour irrégulier et trou dans l'échantillon.
+The main output files are:
 
-Chaque scène se trouve dans `ENVI files/synthetic_data/<nom>/<nom>.hdr`, avec son binaire ENVI BIP float32, `ground_truth.png` (0 = fond, 1–4 = matériaux A–D) et un manifeste de génération. Les scènes comprennent textures spatiales, gradients d'éclairage, ombres, bruit spectral, mélanges aux frontières et variations entre scènes. Les classes ont une signification artificielle et commune aux trois scènes ; aucune signature ne représente un matériau réel certifié ou une mesure HERA.
+| Content | Default location | Formats |
+| --- | --- | --- |
+| Extracted spectra and exported selections | `extracted spectra/`, next to the cube | CSV or NPZ, JSON geometry, PNG preview |
+| Training datasets and ROI libraries | `roi_outputs/` | NPZ and JSON |
+| SVM models | `svm_models/` | Joblib and associated diagnostic files |
+| Classification maps and provenance | `results/` | ENVI, PNG previews, and JSON metadata |
 
-Placer les acquisitions réelles dans `ENVI files/acquisitions_reelles/` ou créer d'autres sous-dossiers dans `ENVI files/`. Dans Postprocessing, le menu **Acquisition folder** affiche uniquement les sous-dossiers directs de `ENVI files/`. **Cube file** liste les en-têtes ENVI du dossier choisi, y compris dans ses sous-dossiers. **Refresh** détecte les nouveaux dossiers et fichiers. **Browse cube...** s'ouvre dans le dossier sélectionné ; les fichiers importés hors de cette arborescence restent accessibles via **External / imported files**.
+Local data, results, models, and environments are excluded from Git tracking in the designated folders. Some exports retain the cube path in their metadata: review their contents before sharing them.
 
-Le générateur est déterministe et réutilise les fichiers intacts. Le relancer ou rouvrir un ENVI ne crée aucun doublon. Les tests utilisent de petites fixtures dans des dossiers de test séparés, sans remplir le sélecteur. Les anciens petits cubes et tous les caches NPY synthétiques ont été supprimés. Le nombre de 121 bandes est un choix de test, pas une contrainte du GUI.
+## Project layout
 
-## État et limites
+```text
+HERAMAN/
+├── gui/                 Graphical interface and interactions
+│   └── features/        View features and analysis tools
+├── processing/          Processing launchers
+│   └── pipeline/        ROI selection, training, and classification
+├── shared/              ENVI I/O and shared utilities
+├── config/              Runtime configuration and local catalogue
+├── styles/              Interface appearance
+├── tools/               Installation, diagnostics, and synthetic data
+├── tests/               Local automated tests (excluded from Git)
+├── docs/                Additional documentation
+├── ENVI files/          Local spectral cubes
+├── roi_outputs/         Generated training datasets and libraries
+├── svm_models/          Locally trained models
+└── results/             Generated analysis outputs
+```
 
-Vérifiés sur données synthétiques : import ENVI, GUI fusionné sans matériel, bande/RGB, sélection et export des pixels, segmentation, entraînement et réutilisation des modèles Linear/RBF avec et sans Platt, refus explicite d’une calibration sans provenance suffisante. Ces vérifications ne constituent pas une validation scientifique sur des données réelles.
+Data and output folders are not supplied with the repository; they are created or populated during use. The [architecture overview](docs/ARCHITECTURE.md) describes folder responsibilities and the connections between the interface, processing, and data.
 
-Tests automatisés : lecture BSQ/BIL/BIP, big-endian et offset ; extraction ROI depuis ENVI ; SVM Linear/RBF avec et sans Platt ; worker CLI ; résultat ENVI relu dans le GUI ; survol et export de pixels. À valider sur données réelles : interactions ROI manuelles, performances de classification sur grands cubes et véritable export NIREOS. Les champs bbl, data ignore value et reflectance scale factor sont conservés dans la provenance mais ne sont pas encore appliqués automatiquement : utiliser actuellement des cubes valides déjà corrigés et des bandes exploitables. Les anciens modèles MARGIN ne sont pas garantis compatibles avec HERA. Les noms de certains fichiers et arguments internes restent historiques pour la compatibilité des résultats existants.
+## Try it without acquisitions
 
-La lecture ENVI est mappée directement sur le binaire ; l'import GUI est synchrone et certaines analyses existantes peuvent encore allouer le cube complet. La composition RGB utilise les bandes les plus proches de 650/550/450 nm ; les longueurs d'onde effectivement utilisées sont affichées. Les statistiques ROI intégrées à cette vue restent à compléter.
+After installation, generate the demonstration scenes from the project root:
 
-Voir `docs/NIREOS_ENVI.md` pour les sources. Les données et modèles locaux existants ont été conservés.
+```powershell
+.\.venv-heraman\Scripts\python.exe tools\generate_synthetic_envi.py
+```
 
-Dans les CSV d’extraction, `cube_name` contient uniquement le nom du fichier ENVI, renseigné sur la première ligne de chaque groupe de cube ; une cellule vide reprend le cube précédent. Le chemin complet reste conservé une seule fois dans les métadonnées JSON (et NPZ).
+The generator creates three scenes in `ENVI files/synthetic_data/`, including ENVI cubes and reference label maps. They let you explore visualization, annotation, and classification. Their signatures are artificial and do not represent measurements of real materials.
+
+## Scope and limitations
+
+HERAMAN is an analysis tool whose results depend on the data, annotations, and training protocol. Synthetic-data experiments and software tests do not constitute scientific validation of performance on new acquisitions.
+
+Cubes must be prepared and corrected before import. ENVI fields `bbl`, `data ignore value`, and `reflectance scale factor` are not applied automatically. Reading uses memory mapping, but some processing steps may load large arrays into memory. The installation environment targets Windows; operation on other systems has not been validated.
+
+Header details and HERA acquisition characteristics are covered in the [ENVI documentation](docs/NIREOS_ENVI.md). The spectral comparison methods are described in the [spectral statistics documentation](docs/spectral_statistics.md).

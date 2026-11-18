@@ -1,8 +1,8 @@
-# Traitements HERAMAN
+# HERAMAN processing pipeline
 
-- `postprocessing_pipeline.py` : lecture ENVI native, segmentation optionnelle, classification et résultats ENVI.
-- `roi_selection_pipeline.py` : génération RGB et sélection ROI ; jeux d'apprentissage et bibliothèques.
-- `svm_classifier.py` : entraînement et application des modèles Linear/RBF, avec calibration Platt optionnelle.
-- `fat_calibration.py` : dépendance conservée pour la lecture des anciens calibrateurs ; le parcours HERAMAN utilise la calibration générique de toutes les classes.
+- `postprocessing_pipeline.py`: native ENVI reading, optional segmentation, classification, and ENVI outputs.
+- `roi_selection_pipeline.py`: RGB generation and ROI selection; training datasets and libraries.
+- `svm_classifier.py`: training and applying linear/RBF models, with optional Platt calibration.
+- `fat_calibration.py`: dependency retained for reading legacy calibrators; the HERAMAN workflow uses generic calibration across all classes.
 
-Les lanceurs de `processing/` utilisent l'environnement Python 64 bits du GUI. Aucun pilote matériel n'est requis.
+The launchers in `processing/` use the GUI's 64-bit Python environment. No hardware drivers are required.

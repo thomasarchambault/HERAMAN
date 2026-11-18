@@ -104,7 +104,7 @@ def write_selection(path, cube, wavelengths, cube_path, coordinates, rois):
         writer.writerows(compact_cube_rows(
             ([r['id'], cube_path, wl, mean, std, r['pixel_count']] for r in summaries
              for wl, mean, std in zip(wavelengths, r['mean'], r['std'])), 1))
-    metadata = dict(cube_path=cube_path, coordinate_origin='zero-based',
+    metadata = dict(cube_path=cube_path, cube_shape=list(cube.shape), coordinate_origin='zero-based',
                     overlap_policy='Pixels are unique; roi_ids lists every containing ROI.',
                     statistics='Per-band finite values; population standard deviation.',
                     rois=[{k: v for k, v in r.items() if k not in ('coordinates_xy', 'mean', 'std')} for r in summaries])
