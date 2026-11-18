@@ -103,6 +103,8 @@ HERAMAN was developed as part of a research project conducted at LumedLab, Polyt
 
 Copyright © 2026 thomasarchambault.
 
-HERAMAN is distributed under the **GNU General Public License, version 3 only** (`GPL-3.0-only`). You may use, modify, and redistribute the software under the terms of this license, including for commercial purposes. Redistribution must comply with its source-code and notice requirements. The software is provided without warranty, as detailed in [LICENSE](LICENSE).
+The original HERAMAN code is distributed under the **GNU Lesser General Public License, version 3 only** (`LGPL-3.0-only`). You may use, modify, and redistribute it, including commercially, subject to the license conditions. The LGPL text is in [LICENSE](LICENSE), and the GPL v3 terms it incorporates are in [COPYING.GPL](COPYING.GPL). The software is provided without warranty, subject to the license terms.
+
+**Dependency limitation:** the application currently uses PyQt5 under GPL v3. Distributing the combined application with this dependency must comply with GPL v3; the LGPL license of HERAMAN's own code does not make that combination available for proprietary distribution.
 
 See [NOTICE](NOTICE) for research attribution and [licensing information](docs/LICENSING.md) for an overview of permissions and obligations. Third-party components retain their own licenses.

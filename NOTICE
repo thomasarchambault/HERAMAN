@@ -1,10 +1,16 @@
 HERAMAN
 Copyright (C) 2026 thomasarchambault
 
-SPDX-License-Identifier: GPL-3.0-only
+SPDX-License-Identifier: LGPL-3.0-only
 
-HERAMAN is distributed under the GNU General Public License, version 3 only.
-The complete license text is provided in LICENSE.
+The original HERAMAN code is distributed under the GNU Lesser General Public
+License, version 3 only. The LGPL text is provided in LICENSE; the GPL v3
+terms it incorporates are provided in COPYING.GPL.
+
+Dependency licensing
+PyQt5 retains its GPL v3 license. Distributing the combined application with
+the GPL edition of PyQt5 must comply with GPL v3. The LGPL license for the
+original HERAMAN code does not relicense PyQt5 or remove its requirements.
 
 Research context
 HERAMAN was developed as part of a research project conducted at LumedLab,
