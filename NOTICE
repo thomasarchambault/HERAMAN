@@ -1,0 +1,17 @@
+HERAMAN
+Copyright (C) 2026 thomasarchambault
+
+SPDX-License-Identifier: GPL-3.0-only
+
+HERAMAN is distributed under the GNU General Public License, version 3 only.
+The complete license text is provided in LICENSE.
+
+Research context
+HERAMAN was developed as part of a research project conducted at LumedLab,
+Polytechnique Montréal. This attribution describes the project's research
+context and does not imply institutional endorsement or a grant of rights
+to institutional names, logos, or trademarks.
+
+Third-party components
+Third-party code and dependencies retain their respective copyright notices
+and licenses. This notice does not replace or relicense those components.

@@ -94,3 +94,15 @@ HERAMAN is an analysis tool whose results depend on the data, annotations, and t
 Cubes must be prepared and corrected before import. ENVI fields `bbl`, `data ignore value`, and `reflectance scale factor` are not applied automatically. Reading uses memory mapping, but some processing steps may load large arrays into memory. The installation environment targets Windows; operation on other systems has not been validated.
 
 Header details and HERA acquisition characteristics are covered in the [ENVI documentation](docs/NIREOS_ENVI.md). The spectral comparison methods are described in the [spectral statistics documentation](docs/spectral_statistics.md).
+
+## Research context
+
+HERAMAN was developed as part of a research project conducted at LumedLab, Polytechnique Montréal.
+
+## License
+
+Copyright © 2026 thomasarchambault.
+
+HERAMAN is distributed under the **GNU General Public License, version 3 only** (`GPL-3.0-only`). You may use, modify, and redistribute the software under the terms of this license, including for commercial purposes. Redistribution must comply with its source-code and notice requirements. The software is provided without warranty, as detailed in [LICENSE](LICENSE).
+
+See [NOTICE](NOTICE) for research attribution and [licensing information](docs/LICENSING.md) for an overview of permissions and obligations. Third-party components retain their own licenses.
