@@ -8,7 +8,7 @@ from matplotlib.font_manager import FontProperties
 from matplotlib.colors import to_rgba
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from PyQt5.QtCore import Qt, QRectF
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QFileDialog, QMessageBox
 
 from gui.inspection_widgets import attach_spectrum_cursor
 
@@ -33,9 +33,13 @@ class SpectraExportViewer(QDialog):
         for index, r in enumerate(summaries):
             self.choice.addItem(f"{r['id']} | {r['shape']} | {r['pixel_count']} pixels | bounds {r['bounds_xyxy']}", index)
         row.addWidget(self.choice, 1)
-        export = QPushButton('Export CSV / NPZ…')
+        export = QPushButton('Export ROI CSV…')
         export.clicked.connect(lambda: save(self))
         row.addWidget(export)
+        image_export = QPushButton('Save image…')
+        image_export.setToolTip('Optional annotated PNG; not needed to reload ROIs.')
+        image_export.clicked.connect(self._save_annotation_dialog)
+        row.addWidget(image_export)
         close = QPushButton('Close')
         close.clicked.connect(self.accept)
         row.addWidget(close)
@@ -135,6 +139,24 @@ class SpectraExportViewer(QDialog):
             if temporary.exists():
                 temporary.unlink()
         figure.clear()
+
+    def _save_annotation_dialog(self):
+        source = Path(self.cube_path)
+        suggested = source.parent / 'extracted spectra' / f'{source.stem}_image_with_ROIs.png'
+        path, _ = QFileDialog.getSaveFileName(self, 'Save annotated ROI image', str(suggested), 'PNG (*.png)')
+        if not path:
+            return
+        destination = Path(path)
+        if not destination.suffix:
+            destination = destination.with_suffix('.png')
+        try:
+            if destination.suffix.lower() != '.png':
+                raise ValueError('Choose a PNG filename for the annotated image.')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            self.save_annotation(destination)
+            self.status.setText(f'Image saved: {destination}\nUse Export ROI CSV to save a reloadable selection.')
+        except Exception as exc:
+            QMessageBox.warning(self, 'Save image', str(exc))
 
     def _draw_mask(self, axes, roi, color, alpha):
         overlay = np.zeros((*self.image.shape[:2], 4), dtype=np.float32)

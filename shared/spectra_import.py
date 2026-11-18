@@ -6,7 +6,23 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from shared.spectra_export import export_paths
+from shared.spectra_export import export_paths, MAX_METADATA_CHARS
+
+# Geometry is stored once in a CSV cell; large polygon selections can exceed
+# the csv module's default 128 KiB field limit.
+csv.field_size_limit(MAX_METADATA_CHARS)
+
+
+def _selection_metadata(path, first_row):
+    if 'selection_metadata' in first_row:
+        metadata = json.loads(first_row['selection_metadata'])
+        if (not isinstance(metadata, dict) or metadata.get('format') != 'HERAMAN ROI selection'
+                or metadata.get('version') != 2):
+            raise ValueError('Unsupported ROI selection format or version.')
+        return metadata
+    # Legacy exports stored geometry in a companion JSON file.
+    geometry_path = export_paths(path)['geometry']
+    return json.loads(geometry_path.read_text(encoding='utf-8')) if geometry_path.is_file() else {}
 
 
 def find_selections(folder):
@@ -50,16 +66,17 @@ def selection_source(path):
                 reader = csv.DictReader(pixels)
                 if not {'x', 'y', 'roi_ids', 'cube_name'}.issubset(reader.fieldnames or []):
                     raise ValueError('The index does not reference a pixel spectra CSV.')
-                source = next(reader, {}).get('cube_name')
+                first_row = next(reader, {})
+                source = first_row.get('cube_name')
         else:
             if not {'x', 'y', 'roi_ids', 'cube_name'}.issubset(fields):
                 raise ValueError('Select a pixel spectra CSV or ROI positions CSV.')
-            source = next(reader, {}).get('cube_name')
+            first_row = next(reader, {})
+            source = first_row.get('cube_name')
     if not source:
         raise ValueError('The CSV does not identify its source cube.')
-    geometry_path = export_paths(path)['geometry']
-    if geometry_path.is_file():
-        metadata = json.loads(geometry_path.read_text(encoding='utf-8'))
+    metadata = _selection_metadata(path, first_row)
+    if metadata:
         recorded = str(metadata.get('cube_path', ''))
         if Path(recorded.replace('\\', '/')).name != Path(source.replace('\\', '/')).name:
             raise ValueError('The geometry and CSV identify different source cubes.')
@@ -73,6 +90,8 @@ def locate_source(pixel_path, source, known_sources=()):
     recorded = Path(source)
     if recorded.is_absolute() and recorded.is_file():
         return recorded.resolve()
+    if not recorded.is_absolute() and (path.parent / recorded).is_file():
+        return (path.parent / recorded).resolve()
     name = Path(source.replace('\\', '/')).name
     for candidate in (path.parent / name, path.parent.parent / name):
         if candidate.is_file():
@@ -84,24 +103,19 @@ def locate_source(pixel_path, source, known_sources=()):
 
 def read_selection(path, cube_path, shape, wavelengths):
     """Read pixel CSV (or its positions index), validating before changing the GUI."""
-    path = Path(path)
+    path, _ = selection_source(path)
     with path.open(newline='', encoding='utf-8-sig') as stream:
         reader = csv.DictReader(stream)
         fields = reader.fieldnames or []
-        if 'pixel_spectra_file' in fields and 'roi_id' in fields:
-            rows = list(reader)
-            names = {row['pixel_spectra_file'] for row in rows}
-            if len(names) != 1:
-                raise ValueError('The ROI index must reference one pixel spectra CSV.')
-            name = names.pop()
-            if Path(name).name != name or Path(name).suffix.lower() != '.csv':
-                raise ValueError('Select the exported pixel spectra CSV for this index.')
-            return read_selection(path.parent / name, cube_path, shape, wavelengths)
         if not {'cube_name', 'x', 'y', 'roi_ids'}.issubset(fields):
             raise ValueError('Select a HERAMAN pixel spectra CSV or ROI positions CSV. Mean spectra do not contain pixel coordinates.')
         if fields[:3] != ['cube_name', 'x', 'y'] or fields[-1] != 'roi_ids':
             raise ValueError('Invalid HERAMAN pixel CSV column order.')
         spectral_fields = fields[3:-1]
+        if 'selection_metadata' in fields:
+            if fields[-2] != 'selection_metadata':
+                raise ValueError('Invalid HERAMAN metadata column position.')
+            spectral_fields = fields[3:-2]
         try:
             axis = np.array([float(field.removesuffix(' nm')) for field in spectral_fields])
         except ValueError as exc:
@@ -110,8 +124,14 @@ def read_selection(path, cube_path, shape, wavelengths):
                 or not np.allclose(axis, wavelengths, rtol=1e-5, atol=1e-6)):
             raise ValueError('The CSV spectral axis does not match the open cube.')
         coordinates, groups, seen = [], {}, set()
-        source = None
+        source, first_row = None, None
         for number, row in enumerate(reader, 2):
+            if first_row is None:
+                first_row = row
+            elif row.get('selection_metadata'):
+                raise ValueError('Selection metadata must occur only in the first pixel row.')
+            if None in row or any(value is None for value in row.values()):
+                raise ValueError(f'Row {number}: incorrect number of columns.')
             if row.get('cube_name'):
                 source = Path(row['cube_name'].replace('\\', '/')).name
             if source != Path(cube_path).name:
@@ -133,10 +153,9 @@ def read_selection(path, cube_path, shape, wavelengths):
                 groups.setdefault(name, []).append((x, y))
     if not coordinates:
         raise ValueError('The CSV contains no selected pixels.')
-    geometry_path = export_paths(path)['geometry']
     geometry = {}
-    if geometry_path.is_file():
-        metadata = json.loads(geometry_path.read_text(encoding='utf-8'))
+    metadata = _selection_metadata(path, first_row)
+    if metadata:
         if metadata.get('coordinate_origin') != 'zero-based':
             raise ValueError('Unsupported ROI coordinate origin.')
         if 'cube_shape' in metadata and list(shape) != metadata['cube_shape']:
@@ -144,8 +163,10 @@ def read_selection(path, cube_path, shape, wavelengths):
         if Path(str(metadata.get('cube_path', '')).replace('\\', '/')).name != Path(cube_path).name:
             raise ValueError('The ROI geometry belongs to another cube.')
         geometry = {roi['id']: roi for roi in metadata['rois']}
+        if len(geometry) != len(metadata['rois']):
+            raise ValueError('ROI identifiers must be unique in selection metadata.')
         if set(geometry) != set(groups):
-            raise ValueError('The geometry file and CSV contain different ROIs.')
+            raise ValueError('The geometry metadata and pixel rows contain different ROIs.')
     rois = []
     for name, pixels in groups.items():
         xy = np.asarray(pixels, dtype=np.int64)

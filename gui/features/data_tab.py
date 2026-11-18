@@ -352,19 +352,16 @@ class DataMixin:
             QMessageBox.warning(self, 'Export', str(exc))
             return
         suggested = export_dir / f'{source.stem}_pixel_spectra'
-        path, kind = QFileDialog.getSaveFileName(
-            self, 'Export pixel spectra', str(suggested), 'CSV (*.csv);;NumPy (*.npz)')
+        path, _ = QFileDialog.getSaveFileName(
+            self, 'Export ROI selection', str(suggested), 'CSV (*.csv)')
         if not path:
             return
         if not Path(path).suffix:
-            path += '.npz' if 'npz' in kind else '.csv'
+            path += '.csv'
         try:
             self._write_pixel_export(path)
             if viewer is not None:
-                from shared.spectra_export import export_paths
-                paths = export_paths(path)
-                viewer.save_annotation(paths['image'])
-                viewer.status.setText(f'Exported: {path}\nROI index, mean spectra, geometry and annotated view saved alongside it.')
+                viewer.status.setText(f'Exported: {path}\nOne CSV contains pixel spectra and complete ROI geometry. Use Load ROIs to restore it.')
         except Exception as exc:
             QMessageBox.warning(self, 'Export', str(exc))
 

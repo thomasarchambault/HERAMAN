@@ -45,7 +45,7 @@ The main output files are:
 
 | Content | Default location | Formats |
 | --- | --- | --- |
-| Extracted spectra and exported selections | `extracted spectra/`, next to the cube | CSV or NPZ, JSON geometry, PNG preview |
+| Extracted spectra and exported selections | `extracted spectra/`, next to the cube | One CSV with spectra and ROI geometry; optional PNG image |
 | Training datasets and ROI libraries | `roi_outputs/` | NPZ and JSON |
 | SVM models | `svm_models/` | Joblib and associated diagnostic files |
 | Classification maps and provenance | `results/` | ENVI, PNG previews, and JSON metadata |

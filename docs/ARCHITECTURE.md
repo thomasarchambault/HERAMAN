@@ -48,7 +48,7 @@ The repository does not include acquisitions, annotations, or trained models. In
 | Folder | Contents |
 | --- | --- |
 | `ENVI files/` | Created on first launch. Add your acquisitions in subfolders, or run the generator to populate `synthetic_data/` with demonstrations. |
-| `extracted spectra/` | Exported spectra, ROI positions, and geometry, next to the corresponding cube. This folder may therefore exist in several acquisition folders. |
+| `extracted spectra/` | One CSV per exported ROI selection, with spectra and geometry included; optional annotated PNGs. Located next to the corresponding cube. |
 | `roi_outputs/` | Created on first launch; populated when you create training datasets, spectral libraries, and annotation previews. |
 | `svm_models/` | Created on first launch; populated with trained models and associated evaluation files. |
 | `results/` | Created during classification to store class maps, probabilities when available, masks, previews, and settings. |
@@ -62,7 +62,7 @@ To start the application, `gui/main.py` initializes Qt and opens the window asse
 
 ## Source and output separation
 
-Source cubes are read without modification. An ROI selection references their pixels; a training dataset collects annotated spectra; a model learns the classes defined in that dataset. Applying the model to a compatible cube produces maps stored separately under `results/`.
+Source cubes are read without modification. An ROI selection references their pixels and is exported as one self-contained CSV. A training dataset collects annotated spectra in internal NPZ records with a JSON spectral library; a Joblib model learns the classes defined in that dataset. Applying the model to a compatible cube produces ENVI maps stored separately under `results/`. Input cubes and classification maps share the same image format; training records and models are handled by the application rather than offered as competing ROI export formats.
 
 Metadata links outputs to their cube and processing settings. To retrieve the associated image and spectra, retain the source ENVI pairs and relevant companion files. Internal paths in several provenance files are relative to the project; external references and some exports may contain absolute paths.
 
