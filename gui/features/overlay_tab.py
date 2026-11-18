@@ -1399,7 +1399,7 @@ class OverlayMixin:
                 if obj is self.ab_view_label:
                     xy = _labelpos_to_imgxy(event.pos()) if event.type() in (
                         QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
-                        QEvent.MouseButtonDblClick, QEvent.MouseMove) else None
+                        QEvent.MouseButtonDblClick, QEvent.MouseMove, QEvent.Wheel) else None
                     if event.type() == QEvent.MouseButtonPress:
                         obj.setFocus()
                     if self._handle_data_selection_event(event, xy):

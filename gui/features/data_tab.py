@@ -19,6 +19,8 @@ class DataMixin:
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
         panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._data_circle_radius = 10
+        self._data_circle_center = None
         self._data_cube = None
         self._data_pixels = []
         self._data_rois = []
@@ -43,7 +45,7 @@ class DataMixin:
         layout.addLayout(row)
         row = QHBoxLayout()
         self.data_selection_mode = QComboBox()
-        for label, mode in (('Pixel', 'pixel'), ('Rectangle', 'rectangle'), ('Polygon', 'polygon')):
+        for label, mode in (('Pixel', 'pixel'), ('Rectangle', 'rectangle'), ('Polygon', 'polygon'), ('Circle', 'circle')):
             self.data_selection_mode.addItem(label, mode)
         self.data_selection_mode.currentIndexChanged.connect(self._change_data_selection_mode)
         row.addWidget(QLabel('Extract:'))
@@ -53,7 +55,7 @@ class DataMixin:
         self.data_selection_info = QLabel('Click to select a pixel for export.')
         self.data_selection_info.setWordWrap(True)
         row.addWidget(self.data_selection_info, 1)
-        export = QPushButton('Export selected pixels…')
+        export = QPushButton('Review / export ROI spectra…')
         export.clicked.connect(self._export_data_pixels)
         load = QPushButton('Load ROIs…')
         load.setToolTip('Choose the cube folder to find its exported ROIs and open their source cube.')
@@ -80,12 +82,14 @@ class DataMixin:
         """Synchronize controls/exports to the cube actually shown by the viewer."""
         path = str(Path(path).resolve()) if path else ''
         if path != getattr(self, '_data_path', None):
+            self._data_circle_center = None
             self._data_pixels = []
             self._data_rois = []
             self._data_selection_mask = None
             self._data_draft = []
             self._data_drag_end = None
         self._data_cube = cube
+        self._data_circle_radius = max(1, min(self._data_circle_radius, max(cube.shape[:2])))
         self._data_wavelengths = np.asarray(wavelengths)
         self._data_path = path
         self._refresh_pp_cube_choices(selected_path=path)
@@ -128,10 +132,12 @@ class DataMixin:
         mode = self.data_selection_mode.currentData()
         hint = {'pixel': 'Click to select a pixel.',
                 'rectangle': 'Drag with the left button to select a rectangle.',
-                'polygon': 'Left-click vertices; right-click to close. Esc cancels.'}[mode]
+                'polygon': 'Left-click vertices; right-click to close. Esc cancels.',
+                'circle': f'Left-click to place a circle. Hold right button + wheel to resize (radius {self._data_circle_radius} px).'}[mode]
         self.data_selection_info.setText(f'{len(self._data_rois)} ROIs · {len(self._data_pixels)} unique pixels — {hint}')
 
     def _change_data_selection_mode(self, *_):
+        self._data_circle_center = None
         self._data_draft = []
         self._data_drag_end = None
         self._update_data_selection_info()
@@ -159,6 +165,19 @@ class DataMixin:
         self._update_data_selection_info()
         self._render_spectral_image()
 
+    def _add_data_circle(self, center):
+        region = np.zeros(self._data_cube.shape[:2], np.uint8)
+        cv2.circle(region, center, self._data_circle_radius, 1, -1)
+        yy, xx = np.nonzero(region)
+        self._register_data_roi('circle', [center], np.column_stack((xx, yy)))
+        self._data_rois[-1]['radius_px'] = self._data_circle_radius
+        selected = self._ensure_data_selection_mask()
+        yy, xx = np.nonzero((region != 0) & ~selected)
+        self._data_pixels.extend(zip(xx.tolist(), yy.tolist()))
+        selected[yy, xx] = True
+        self._update_data_selection_info()
+        self._render_spectral_image()
+
     def _register_data_roi(self, shape, vertices, coordinates):
         existing = {roi['id'] for roi in self._data_rois}
         number = len(existing) + 1
@@ -182,6 +201,33 @@ class DataMixin:
         if kind == QEvent.KeyPress and event.key() == Qt.Key_Escape:
             self._change_data_selection_mode()
             return True
+        if mode == 'circle':
+            if kind == QEvent.Leave:
+                self._data_circle_center = None
+                self._render_spectral_image()
+            if kind == QEvent.Wheel and event.buttons() & Qt.RightButton:
+                delta = event.angleDelta().y() / 120.
+                self._data_circle_radius = max(1, min(max(self._data_cube.shape[:2]),
+                    int(round(self._data_circle_radius * (1.15 ** delta))) + (1 if delta > 0 else -1 if delta < 0 else 0)))
+                self._data_circle_center = xy
+                self._update_data_selection_info()
+                self._render_spectral_image()
+                return True
+            if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease) and event.button() == Qt.RightButton:
+                self._data_circle_center = xy
+                self._render_spectral_image()
+                return True
+            if kind == QEvent.MouseMove and not event.buttons() & Qt.MiddleButton:
+                self._data_circle_center = xy
+                self._render_spectral_image()
+                return False
+            if kind == QEvent.MouseButtonPress and event.button() == Qt.LeftButton and xy is not None:
+                self._data_circle_center = xy
+                self._add_data_circle(xy)
+                return True
+            if kind == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                return True
+            return False
         if mode == 'pixel':
             return False
         if (mode == 'polygon' and self._data_draft and kind == QEvent.MouseButtonPress
@@ -211,11 +257,12 @@ class DataMixin:
         return False
 
     def _draw_data_selection(self, image):
+        from gui.roi_labels import roi_outline_paths
         self.ab_view_label.roi_annotations = []
         if self._data_cube is None:
             return image
         mask = self._data_selection_mask
-        if (mask is not None and mask.any()) or self._data_draft:
+        if (mask is not None and mask.any()) or self._data_draft or self._data_circle_center is not None:
             image = image.copy()
         if mask is not None and mask.shape == image.shape[:2] and mask.any():
             image[mask] = (image[mask] * .6 + np.array([0, 220, 255]) * .4).astype(np.uint8)
@@ -225,6 +272,8 @@ class DataMixin:
                 cv2.polylines(image, [points], True, (0, 220, 255), 1)
             elif roi['shape'] == 'rectangle':
                 cv2.rectangle(image, tuple(points[0]), tuple(points[1]), (0, 220, 255), 1)
+            elif roi['shape'] == 'circle':
+                cv2.circle(image, tuple(points[0]), roi['radius_px'], (0, 220, 255), 1)
             elif roi['shape'] == 'mask':
                 region = np.zeros(image.shape[:2], np.uint8)
                 xy = roi['coordinates_xy']
@@ -234,7 +283,9 @@ class DataMixin:
             xy = roi['coordinates_xy']
             self.ab_view_label.roi_annotations.append(
                 (roi['id'], (*xy.min(axis=0), *xy.max(axis=0)),
-                 roi['vertices_xy'] if roi['shape'] == 'polygon' else None))
+                 roi_outline_paths(roi)))
+        if self._data_circle_center is not None and self.data_selection_mode.currentData() == 'circle':
+            cv2.circle(image, self._data_circle_center, self._data_circle_radius, (0, 255, 255), 1)
         if self._data_draft:
             points = self._data_draft
             if self.data_selection_mode.currentData() == 'rectangle':
@@ -247,6 +298,7 @@ class DataMixin:
         return image
 
     def _clear_data_pixels(self):
+        self._data_circle_center = None
         self._data_pixels = []
         self._data_rois = []
         self._data_selection_mask = None
@@ -268,6 +320,7 @@ class DataMixin:
         return read_selection(path, self._data_path, self._data_cube.shape, self._data_wavelengths)
 
     def _restore_data_rois(self, coordinates, rois):
+        self._data_circle_center = None
         self._data_pixels = [tuple(xy) for xy in coordinates.tolist()]
         self._data_rois = rois
         self._data_selection_mask = np.zeros(self._data_cube.shape[:2], dtype=bool)

@@ -9,7 +9,7 @@ The project works directly with **ENVI** files and can analyze acquisitions with
 ## What HERAMAN can do
 
 - **Explore a cube**: display an RGB composite or a spectral band, navigate the image, and inspect pixel spectra.
-- **Extract regions of interest (ROIs)**: select pixels, rectangles, or polygons, compare their spectra, and export the data. Exported selections can be reloaded on their source cube.
+- **Extract regions of interest (ROIs)**: select pixels, rectangles, polygons, or circles, compare their spectra, and export the data. Exported selections can be reloaded on their source cube.
 - **Build a training dataset**: define classes and organize annotations into separate profiles.
 - **Train and apply SVM models**: compare linear and RBF kernels, with optional probability calibration, then classify other compatible cubes.
 - **Inspect results**: overlay class maps on the image, examine probabilities when available, and use intensity segmentation to restrict analysis to the sample.
@@ -45,7 +45,7 @@ The main output files are:
 
 | Content | Default location | Formats |
 | --- | --- | --- |
-| Extracted spectra and exported selections | `extracted spectra/`, next to the cube | One CSV with spectra and ROI geometry; optional PNG image |
+| Extracted spectra and exported selections | `extracted spectra/`, next to the cube | Pixel CSV with ROI geometry, or mean spectra CSV (one row per ROI); optional PNG image |
 | Training datasets and ROI libraries | `roi_outputs/` | NPZ and JSON |
 | SVM models | `svm_models/` | Joblib and associated diagnostic files |
 | Classification maps and provenance | `results/` | ENVI, PNG previews, and JSON metadata |

@@ -46,6 +46,30 @@ def roi_summaries(cube, rois):
     return result
 
 
+def write_roi_means(path, wavelengths, cube_path, summaries):
+    """Export one mean spectrum per ROI, without individual pixel records."""
+    path = Path(path)
+    if path.suffix.lower() != '.csv':
+        raise ValueError('ROI mean spectra can only be exported as CSV.')
+    if not summaries:
+        raise ValueError('There are no ROI spectra to export.')
+    if any(np.asarray(roi['mean']).shape != (len(wavelengths),) for roi in summaries):
+        raise ValueError('ROI mean spectra do not match the wavelength axis.')
+    temporary = None
+    try:
+        with NamedTemporaryFile(mode='w', newline='', encoding='utf-8',
+                                dir=path.parent, suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            writer = csv.writer(stream)
+            writer.writerow(['cube_name', 'roi_id', 'pixel_count', *[f'{wl:.9g} nm' for wl in wavelengths]])
+            for roi in summaries:
+                writer.writerow([Path(cube_path).name, roi['id'], roi['pixel_count'], *roi['mean']])
+        temporary.replace(path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
 def write_selection(path, cube, wavelengths, cube_path, coordinates, rois):
     """Write one reloadable CSV, with geometry embedded in the first pixel row."""
     path = Path(path)
@@ -72,7 +96,8 @@ def write_selection(path, cube, wavelengths, cube_path, coordinates, rois):
     metadata = json.dumps(dict(format='HERAMAN ROI selection', version=2,
                                cube_path=reference, cube_shape=list(cube.shape),
                                coordinate_origin='zero-based',
-                               rois=[dict(id=r['id'], shape=r['shape'], vertices_xy=r['vertices_xy'])
+                               rois=[dict(id=r['id'], shape=r['shape'], vertices_xy=r['vertices_xy'],
+                                          **({'radius_px': r['radius_px']} if r['shape'] == 'circle' else {}))
                                      for r in rois]), separators=(',', ':'))
     if len(metadata) > MAX_METADATA_CHARS:
         raise ValueError('Too much ROI geometry for one CSV. Export fewer ROIs at a time.')

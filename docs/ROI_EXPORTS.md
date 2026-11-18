@@ -10,11 +10,19 @@ The default filename is `*_pixel_spectra.csv` in `extracted spectra/`, next to t
 
 ## Selecting and exporting
 
-Under **Extract**, choose **Pixel**, **Rectangle**, or **Polygon**. Draw a rectangle by dragging with the left mouse button. For a polygon, place vertices with left-clicks and finish with a right-click; Escape cancels the current drawing. **Clear selection** clears the selection. Middle-button panning and zoom remain available.
+Under **Extract**, choose **Pixel**, **Rectangle**, **Polygon**, or **Circle**. Draw a rectangle by dragging with the left mouse button. For a polygon, place vertices with left-clicks and finish with a right-click; Escape cancels the current drawing. **Clear selection** clears the selection. Middle-button panning and zoom remain available.
 
-Each ROI has an identifier displayed on the image. **Export selected pixels…** opens a preview to compare mean spectra and their standard deviations. Click **Export ROI CSV…** to save the complete selection.
+For a circle, move the pointer to preview its position and left-click to place it. Hold the right mouse button and scroll up or down to increase or decrease its radius. The current radius is shown in native cube pixels, so zooming does not change the selected area. Circles at the image edges include only pixels inside the cube. The wheel without the right button still zooms, and the middle button still pans.
 
-**Save image…** is a separate, optional action that creates an annotated PNG. The image is not required to reload the selection.
+Each ROI has an identifier displayed on the image. **Review / export ROI spectra…** opens a preview to compare mean spectra and their standard deviations. Click **Export pixel spectra (CSV)…** to save the complete selection.
+
+**Save annotated image (PNG)…** is a separate, optional action that creates an annotated PNG. The image is not required to reload the selection.
+
+## Exporting mean spectra only
+
+Click **Export mean spectra (CSV)…** in the ROI preview to save a compact `*_ROI_mean_spectra.csv` file. It contains one row per ROI, with `cube_name`, `roi_id`, `pixel_count`, and one mean value per wavelength in nm. This action exports all ROIs, including when the preview shows just one of them. It does not export individual pixel spectra or geometry.
+
+Each mean is computed from the ROI's pixels in the source cube, ignoring non-finite values separately for each band. Overlapping pixels contribute to each containing ROI. The mean-only CSV is intended for spectral analysis; use **Export pixel spectra (CSV)…** to save a selection that can be reloaded on the image. Both exports are independent and can be used separately or together.
 
 ## Reloading from a folder
 

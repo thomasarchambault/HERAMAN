@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib.figure import Figure
-from matplotlib.patches import Polygon, Rectangle
+from matplotlib.patches import Polygon, Rectangle, Circle
 from matplotlib.font_manager import FontProperties
 from matplotlib.colors import to_rgba
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
@@ -32,11 +32,17 @@ class SpectraExportViewer(QDialog):
         self.choice.addItem('All ROIs', -1)
         for index, r in enumerate(summaries):
             self.choice.addItem(f"{r['id']} | {r['shape']} | {r['pixel_count']} pixels | bounds {r['bounds_xyxy']}", index)
-        row.addWidget(self.choice, 1)
-        export = QPushButton('Export ROI CSV…')
+        layout.addWidget(self.choice)
+        row.addStretch(1)
+        export = QPushButton('Export pixel spectra (CSV)…')
+        export.setToolTip('All selected pixels, including ROI geometry for reloading the selection.')
         export.clicked.connect(lambda: save(self))
         row.addWidget(export)
-        image_export = QPushButton('Save image…')
+        means_export = QPushButton('Export mean spectra (CSV)…')
+        means_export.setToolTip('Save one mean spectrum per ROI for all ROIs, without individual pixels.')
+        means_export.clicked.connect(self._save_means_dialog)
+        row.addWidget(means_export)
+        image_export = QPushButton('Save annotated image (PNG)…')
         image_export.setToolTip('Optional annotated PNG; not needed to reload ROIs.')
         image_export.clicked.connect(self._save_annotation_dialog)
         row.addWidget(image_export)
@@ -75,7 +81,9 @@ class SpectraExportViewer(QDialog):
             if r['shape'] == 'mask':
                 self._draw_mask(self.image_ax, r, color, .35 if active else .1)
             points = np.asarray(r['vertices_xy'])
-            if r['shape'] == 'polygon':
+            if r['shape'] == 'circle':
+                patch = Circle(r['vertices_xy'][0], r['radius_px'], fill=False)
+            elif r['shape'] == 'polygon':
                 patch = Polygon(points, closed=True, fill=False)
             else:
                 x0, y0, x1, y1 = r['bounds_xyxy']
@@ -90,6 +98,8 @@ class SpectraExportViewer(QDialog):
             if active:
                 self.spectrum_ax.plot(self.wavelengths, r['mean'], color=color, label=r['id'])
                 self.spectrum_ax.fill_between(self.wavelengths, r['mean']-r['std'], r['mean']+r['std'], color=color, alpha=.15)
+        self.image_ax.set_xlim(-.5, self.image.shape[1]-.5)
+        self.image_ax.set_ylim(self.image.shape[0]-.5, -.5)
         self.image_ax.set_title('ROI positions · coordinates start at 0')
         self.image_ax.set_xlabel('x (pixel)')
         self.image_ax.set_ylabel('y (pixel)')
@@ -116,7 +126,9 @@ class SpectraExportViewer(QDialog):
         for index, roi in enumerate(self.summaries):
             if roi['shape'] == 'mask':
                 self._draw_mask(axes, roi, f'C{index % 10}', .35)
-            if roi['shape'] == 'polygon':
+            if roi['shape'] == 'circle':
+                patch = Circle(roi['vertices_xy'][0], roi['radius_px'], fill=False)
+            elif roi['shape'] == 'polygon':
                 patch = Polygon(roi['vertices_xy'], closed=True, fill=False)
             else:
                 x0, y0, x1, y1 = roi['bounds_xyxy']
@@ -125,6 +137,8 @@ class SpectraExportViewer(QDialog):
             patch.set_linewidth(1.5)
             axes.add_patch(patch)
             patches.append(patch)
+        axes.set_xlim(-.5, width-.5)
+        axes.set_ylim(height-.5, -.5)
         axes.set_title('ROI positions · '+Path(self.cube_path).name)
         axes.set_xlabel('x (pixel)')
         axes.set_ylabel('y (pixel)')
@@ -140,6 +154,23 @@ class SpectraExportViewer(QDialog):
                 temporary.unlink()
         figure.clear()
 
+    def _save_means_dialog(self):
+        from shared.spectra_export import write_roi_means
+        source = Path(self.cube_path)
+        suggested = source.parent / 'extracted spectra' / f'{source.stem}_ROI_mean_spectra.csv'
+        path, _ = QFileDialog.getSaveFileName(self, 'Export mean spectra — all ROIs', str(suggested), 'CSV (*.csv)')
+        if not path:
+            return
+        destination = Path(path)
+        if not destination.suffix:
+            destination = destination.with_suffix('.csv')
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            write_roi_means(destination, self.wavelengths, self.cube_path, self.summaries)
+            self.status.setText(f'Mean spectra exported: {destination}\nOne row per ROI, without individual pixels. Use Export pixel spectra (CSV) for a reloadable selection.')
+        except Exception as exc:
+            QMessageBox.warning(self, 'Export mean spectra', str(exc))
+
     def _save_annotation_dialog(self):
         source = Path(self.cube_path)
         suggested = source.parent / 'extracted spectra' / f'{source.stem}_image_with_ROIs.png'
@@ -154,7 +185,7 @@ class SpectraExportViewer(QDialog):
                 raise ValueError('Choose a PNG filename for the annotated image.')
             destination.parent.mkdir(parents=True, exist_ok=True)
             self.save_annotation(destination)
-            self.status.setText(f'Image saved: {destination}\nUse Export ROI CSV to save a reloadable selection.')
+            self.status.setText(f'Image saved: {destination}\nUse Export pixel spectra (CSV) to save a reloadable selection.')
         except Exception as exc:
             QMessageBox.warning(self, 'Save image', str(exc))
 
@@ -166,7 +197,7 @@ class SpectraExportViewer(QDialog):
 
 
 def add_roi_labels(axes, canvas, summaries, patches):
-    from gui.roi_labels import place_roi_labels, nearest_outline_point
+    from gui.roi_labels import place_roi_labels, roi_outline_paths, roi_leader_endpoints
     renderer = canvas.get_renderer()
     bounds = [QRectF(p.get_window_extent().x0, p.get_window_extent().y0,
                      p.get_window_extent().width, p.get_window_extent().height) for p in patches]
@@ -180,8 +211,11 @@ def add_roi_labels(axes, canvas, summaries, patches):
         if placement is None:
             continue
         rect, start, _ = placement
-        if r['shape'] == 'polygon':
-            start = nearest_outline_point(axes.transData.transform(r['vertices_xy']).tolist(), rect.center())
+        paths = [axes.transData.transform(points).tolist() for points in roi_outline_paths(r, pixel_edges=True)]
+        endpoints = roi_leader_endpoints(paths, rect, QRectF(area.x0, area.y0, area.width, area.height))
+        if endpoints is None:
+            continue
+        start, _ = endpoints
         anchor = axes.transData.inverted().transform((start.x(), start.y()))
         position = axes.transData.inverted().transform((rect.center().x(), rect.center().y()))
         annotation = axes.annotate(

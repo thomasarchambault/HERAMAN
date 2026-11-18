@@ -168,7 +168,7 @@ class ZoomablePixmapLabel(ResizablePixmapLabel):
         painter.setRenderHint(QPainter.SmoothPixmapTransform, self.zoom <= 1.)
         painter.drawPixmap(self.image_rect(), self._orig_pix, QRectF(self._orig_pix.rect()))
         # Text is drawn after scaling the image, so zoom never enlarges labels.
-        from gui.roi_labels import place_roi_labels, nearest_outline_point
+        from gui.roi_labels import place_roi_labels, roi_leader_endpoints
         image = self.image_rect()
         sx, sy = image.width()/self._orig_pix.width(), image.height()/self._orig_pix.height()
         bounds = [QRectF(image.left()+x0*sx, image.top()+y0*sy,
@@ -181,13 +181,17 @@ class ZoomablePixmapLabel(ResizablePixmapLabel):
         sizes = [(metrics.horizontalAdvance(name)+8, metrics.height()+4) for name, _, _ in self.roi_annotations]
         placements = place_roi_labels(bounds, sizes, QRectF(self.rect()).adjusted(3, 3, -3, -3))
         painter.setRenderHint(QPainter.Antialiasing)
-        for (name, _, polygon), placement in zip(self.roi_annotations, placements):
+        viewport = image.intersected(QRectF(self.rect()))
+        for (name, _, outlines), placement in zip(self.roi_annotations, placements):
             if placement is None:
                 continue
             rect, start, end = placement
-            if polygon:
-                points = [(image.left()+(x+.5)*sx, image.top()+(y+.5)*sy) for x, y in polygon]
-                start = nearest_outline_point(points, rect.center())
+            paths = [[(image.left()+(x+.5)*sx, image.top()+(y+.5)*sy) for x, y in points]
+                     for points in outlines]
+            endpoints = roi_leader_endpoints(paths, rect, viewport)
+            if endpoints is None:
+                continue
+            start, end = endpoints
             painter.setPen(QPen(QColor('#ffdc50'), 1))
             painter.drawLine(start, end)
             painter.fillRect(rect, QColor(25, 25, 25, 210))

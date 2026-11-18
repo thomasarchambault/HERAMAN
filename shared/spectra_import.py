@@ -189,6 +189,12 @@ def read_selection(path, cube_path, shape, wavelengths):
                 cv2.rectangle(mask, tuple(vertices[0]), tuple(vertices[1]), 1, -1)
             elif kind == 'polygon' and len(vertices) >= 3:
                 cv2.fillPoly(mask, [vertices], 1)
+            elif kind == 'circle' and len(vertices) == 1:
+                radius = saved.get('radius_px')
+                if (isinstance(radius, bool) or not isinstance(radius, int)
+                        or not 1 <= radius <= max(shape[:2])):
+                    raise ValueError(f'{name}: invalid circle radius.')
+                cv2.circle(mask, tuple(vertices[0]), radius, 1, -1)
             elif kind == 'pixel' and len(vertices) == 1:
                 mask[vertices[0, 1], vertices[0, 0]] = 1
             elif kind != 'mask':
@@ -196,5 +202,8 @@ def read_selection(path, cube_path, shape, wavelengths):
             if kind != 'mask' and (int(mask.sum()) != len(xy) or not mask[xy[:, 1], xy[:, 0]].all()):
                 raise ValueError(f'{name}: geometry does not match CSV pixels.')
             vertices = vertices.tolist()
-        rois.append(dict(id=name, shape=kind, vertices_xy=vertices, coordinates_xy=xy))
+        roi = dict(id=name, shape=kind, vertices_xy=vertices, coordinates_xy=xy)
+        if kind == 'circle':
+            roi['radius_px'] = geometry[name]['radius_px']
+        rois.append(roi)
     return np.asarray(coordinates, dtype=np.int64), rois
