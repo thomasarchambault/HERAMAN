@@ -21,7 +21,7 @@ HERAMAN targets **Windows x64**, with **64-bit Python 3.10 to 3.12**. An Interne
 1. Download or clone the repository into a writable folder.
 2. Install Python x64 if needed, then run **`INSTALL HERAMAN.bat`**. The script creates the local `.venv-heraman` environment and installs the project dependencies.
 3. Open the application with **`HERAMAN LAUNCHER.bat`**.
-4. Place acquisitions in a subfolder of `ENVI files/`, then select a cube in the **Visualisation** tab.
+4. The application creates `ENVI files/` on first launch. Create an acquisition subfolder inside it, add your ENVI files, then refresh the cube list and select a cube in the **Visualisation** tab.
 
 Keep each `.hdr` header together with its ENVI binary file. Data and trained models are not included in the repository.
 
@@ -54,25 +54,28 @@ Local data, results, models, and environments are excluded from Git tracking in 
 
 ## Project layout
 
+After downloading or cloning the repository, the main folders and entry points are:
+
 ```text
 HERAMAN/
+├── README.md            Project overview and quick start
+├── INSTALLATION.md      Setup and troubleshooting guide
+├── INSTALL HERAMAN.bat  Windows installer
+├── HERAMAN LAUNCHER.bat Windows launcher
 ├── gui/                 Graphical interface and interactions
 │   └── features/        View features and analysis tools
 ├── processing/          Processing launchers
 │   └── pipeline/        ROI selection, training, and classification
 ├── shared/              ENVI I/O and shared utilities
-├── config/              Runtime configuration and local catalogue
+├── config/              Default runtime configuration
 ├── styles/              Interface appearance
 ├── tools/               Installation, diagnostics, and synthetic data
-├── tests/               Local automated tests (excluded from Git)
-├── docs/                Additional documentation
-├── ENVI files/          Local spectral cubes
-├── roi_outputs/         Generated training datasets and libraries
-├── svm_models/          Locally trained models
-└── results/             Generated analysis outputs
+└── docs/                Additional documentation
 ```
 
-Data and output folders are not supplied with the repository; they are created or populated during use. The [architecture overview](docs/ARCHITECTURE.md) describes folder responsibilities and the connections between the interface, processing, and data.
+Installation creates `.venv-heraman/`. On first launch, the application creates `ENVI files/`, `roi_outputs/`, and `svm_models/`; these folders initially contain no acquisitions, annotations, or trained models. Classification creates outputs under `results/`, and exporting spectra creates `extracted spectra/` next to the source cube. The output table above describes their contents.
+
+The [architecture overview](docs/ARCHITECTURE.md) explains how the supplied code folders interact and where your data and generated results are stored.
 
 ## Try it without acquisitions
 

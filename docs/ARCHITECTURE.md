@@ -27,6 +27,8 @@ The interface and processing modules use `shared/` to read cubes, manage paths, 
 
 ## Source and configuration folders
 
+These folders are included when you download or clone the repository.
+
 | Folder | Purpose |
 | --- | --- |
 | `gui/` | Application startup, main window assembly, display components, and dialogs. |
@@ -37,22 +39,20 @@ The interface and processing modules use `shared/` to read cubes, manage paths, 
 | `config/` | Runtime environment settings. The local cube catalogue, `envi_sources.json`, is generated and ignored by Git; the generic `runtime_64.json` configuration is supplied. |
 | `styles/` | Qt stylesheet defining the interface appearance. |
 | `tools/` | Environment installation, startup, diagnostics, and synthetic scene generation. Dependencies are defined in `requirements-64bit.txt`. |
-| `tests/` | Local automated tests and workflow checks. This folder is excluded from Git and is not distributed with the repository. |
 | `docs/` | Additional guides on architecture, ENVI data, ROI exports, and statistical methods. |
 
 ## Local working folders
 
-These folders are not distributed as data with the repository. They appear during installation, when acquisitions are added, or when analyses run.
+The repository does not include acquisitions, annotations, or trained models. Installation creates the Python environment; the first application launch creates the empty acquisition, ROI dataset, and model folders. Other output folders appear when you run the corresponding operation.
 
 | Folder | Contents |
 | --- | --- |
-| `ENVI files/` | Acquisitions to analyze, organized into subfolders. `synthetic_data/` holds generated demonstrations. |
+| `ENVI files/` | Created on first launch. Add your acquisitions in subfolders, or run the generator to populate `synthetic_data/` with demonstrations. |
 | `extracted spectra/` | Exported spectra, ROI positions, and geometry, next to the corresponding cube. This folder may therefore exist in several acquisition folders. |
-| `roi_outputs/` | Training datasets by profile, spectral libraries, previews, and annotation provenance. |
-| `svm_models/` | Trained models and associated evaluation files. |
-| `results/` | Class maps, probabilities when available, masks, previews, and classification settings. |
+| `roi_outputs/` | Created on first launch; populated when you create training datasets, spectral libraries, and annotation previews. |
+| `svm_models/` | Created on first launch; populated with trained models and associated evaluation files. |
+| `results/` | Created during classification to store class maps, probabilities when available, masks, previews, and settings. |
 | `.venv-heraman/` | Locally installed Python environment. It must be recreated on each computer. |
-| `tmp/` | Temporary files used by some local checks and operations. |
 
 ## Code entry points
 
