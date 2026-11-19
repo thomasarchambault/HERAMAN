@@ -385,6 +385,13 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         # Keep older installations and externally imported cubes accessible.
         choices.extend((p.name + " (legacy)", str(p.resolve())) for p in
                        (PROJECT_ROOT/'synthetic_data', PROJECT_ROOT/'data') if p.is_dir())
+        envi_root = ENVI_FILES_DIR.resolve()
+        root_cubes = [
+            str(path.resolve()) for path in ENVI_FILES_DIR.iterdir()
+            if path.is_file() and path.name.casefold().endswith("_nrm.hdr")
+        ]
+        if root_cubes:
+            choices.append(("ENVI files (root)", str(envi_root)))
         choices.append(("External / imported files", "external"))
         folder = self.combo_pp_folder.currentData()
         if selected_path:
@@ -404,21 +411,29 @@ class PostProcessingMixin(PostprocessingModelsMixin):
             roots = [Path(value) for _, value in choices if value != "external"]
             sources = {value for value in registered_sources()
                        if not any(Path(value).is_relative_to(root) for root in roots)}
+        elif folder == str(envi_root):
+            sources = root_cubes
         else:
             root = Path(folder)
             candidates = root.rglob('*')
             sources = {str(p.resolve()) for p in candidates if p.is_file() and p.suffix.lower() == '.hdr'}
         sources = {os.path.normcase(value): value for value in sources}
-        paths = sorted(
-            (value for value in sources.values() if Path(value).name.casefold().endswith("_nrm.hdr")),
-            key=lambda value: Path(value).name.casefold(),
-        )
+        dated_paths = []
+        for path in sources.values():
+            header = Path(path)
+            if not header.name.casefold().endswith("_nrm.hdr"):
+                continue
+            try:
+                info = header.stat()
+            except FileNotFoundError:
+                continue
+            arrival = getattr(info, "st_birthtime_ns", info.st_mtime_ns)
+            dated_paths.append((-arrival, header.name.casefold(), path))
         self.combo_pp_cube.blockSignals(True)
         self.combo_pp_cube.clear()
-        for path in paths:
-            label = f"{Path(path).parent.name} / {Path(path).name}"
-            self.combo_pp_cube.addItem(label, path)
-            self.combo_pp_cube.setItemData(self.combo_pp_cube.count() - 1, label, Qt.ToolTipRole)
+        for _, _, path in sorted(dated_paths):
+            self.combo_pp_cube.addItem(Path(path).name, path)
+            self.combo_pp_cube.setItemData(self.combo_pp_cube.count() - 1, path, Qt.ToolTipRole)
         index = self.combo_pp_cube.findData(sources.get(os.path.normcase(selected), selected))
         self.combo_pp_cube.setCurrentIndex(index if selected_path else max(0, index))
         self.combo_pp_cube.blockSignals(False)
