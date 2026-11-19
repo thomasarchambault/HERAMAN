@@ -18,13 +18,21 @@ def resolve_envi_binary(header, fields):
         binary = candidates[0]
     return binary.resolve()
 
-def read_envi(path, *, require_wavelengths=True):
-    header = resolve_envi_header(path)
-    text = header.read_text(encoding='utf-8-sig')
+def _read_header_fields(header):
+    try:
+        text = header.read_text(encoding='utf-8-sig')
+    except UnicodeDecodeError:
+        # HERA on Windows can save accented comments in the local code page.
+        text = header.read_text(encoding='cp1252')
     if not text.strip().startswith('ENVI'):
         raise ValueError('Missing ENVI signature.')
-    fields = {m.group(1).strip().lower(): m.group(2).strip().strip('{}').strip()
-              for m in re.finditer(r'(?m)^\s*([^;\n={}]+?)\s*=\s*(\{[^}]*\}|[^\n]*)', text)}
+    return {m.group(1).strip().lower(): m.group(2).strip().strip('{}').strip()
+            for m in re.finditer(r'(?m)^\s*([^;\n={}]+?)\s*=\s*(\{[^}]*\}|[^\n]*)', text)}
+
+
+def read_envi(path, *, require_wavelengths=True):
+    header = resolve_envi_header(path)
+    fields = _read_header_fields(header)
     h, w, n = (int(fields[k]) for k in ('lines','samples','bands'))
     if min(h,w,n) < 1:
         raise ValueError('Invalid ENVI dimensions.')
@@ -83,9 +91,7 @@ def resolve_envi_header(path):
         raise ValueError('Select the ENVI .hdr file; the binary header is missing or ambiguous.')
     header = candidates.pop()
     # Verify the chosen header actually points at this binary, not a neighbour.
-    text = header.read_text(encoding='utf-8-sig')
-    fields = {m.group(1).strip().lower(): m.group(2).strip().strip('{}').strip()
-              for m in re.finditer(r'(?m)^\s*([^;\n={}]+?)\s*=\s*(\{[^}]*\}|[^\n]*)', text)}
+    fields = _read_header_fields(header)
     if resolve_envi_binary(header, fields) != path:
         raise ValueError('The ENVI header refers to a different binary file.')
     return header

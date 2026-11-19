@@ -3,9 +3,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PyQt5.QtCore import Qt, QEvent
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSlider, QFileDialog, QMessageBox, QComboBox, QSizePolicy, QInputDialog
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSlider, QFileDialog, QMessageBox, QComboBox, QSizePolicy, QInputDialog, QDoubleSpinBox
 from shared.envi import load_spectral_cube
-from shared.cube_preview import make_rgb_preview, stretch_display_band
+from shared.cube_preview import NIREOS_RGB_WAVELENGTHS, grayscale_limits, make_rgb_preview, scale_display_band
 from shared.envi_catalog import register_envi_source
 from shared.paths import ENVI_FILES_DIR
 
@@ -32,7 +32,8 @@ class DataMixin:
         layout.addWidget(self.data_info)
         row = QHBoxLayout()
         self.data_display = QComboBox()
-        self.data_display.addItem('RGB (nearest 650 / 550 / 450 nm)', 'rgb')
+        rgb_targets = ' / '.join(f'{value:g}' for value in NIREOS_RGB_WAVELENGTHS)
+        self.data_display.addItem(f'False RGB ({rgb_targets} nm)', 'rgb')
         self.data_display.addItem('Single band', 'band')
         self.data_display.currentIndexChanged.connect(self._draw_data)
         row.addWidget(self.data_display)
@@ -42,6 +43,26 @@ class DataMixin:
         row.addWidget(self.data_band, 1)
         self.data_band_label = QLabel('No cube loaded')
         row.addWidget(self.data_band_label)
+        layout.addLayout(row)
+        row = QHBoxLayout()
+        self.data_low_cut = QDoubleSpinBox()
+        self.data_high_cut = QDoubleSpinBox()
+        for label, cut, value in (('Low cut', self.data_low_cut, 0.),
+                                  ('High cut', self.data_high_cut, 100.)):
+            cut.setDecimals(1)
+            cut.setRange(0., 200.)
+            cut.setSuffix(' %')
+            cut.setValue(value)
+            cut.setToolTip(f'{label} as a percentage of the cube’s reference white level.')
+            row.addWidget(QLabel(label))
+            row.addWidget(cut)
+        self._update_data_contrast()
+        self.data_low_cut.valueChanged.connect(self._update_data_contrast)
+        self.data_high_cut.valueChanged.connect(self._update_data_contrast)
+        reset_contrast = QPushButton('Reset contrast')
+        reset_contrast.clicked.connect(self._reset_data_contrast)
+        row.addWidget(reset_contrast)
+        row.addStretch()
         layout.addLayout(row)
         row = QHBoxLayout()
         self.data_selection_mode = QComboBox()
@@ -68,6 +89,15 @@ class DataMixin:
         layout.addLayout(row)
         return panel
 
+    def _update_data_contrast(self, *_):
+        self.data_low_cut.setMaximum(self.data_high_cut.value() - 0.1)
+        self.data_high_cut.setMinimum(self.data_low_cut.value() + 0.1)
+        self._draw_data()
+
+    def _reset_data_contrast(self):
+        self.data_low_cut.setValue(0.)
+        self.data_high_cut.setValue(100.)
+
     def _view_selected_cube(self):
         path = self.combo_pp_cube.currentData()
         if not path:
@@ -88,6 +118,8 @@ class DataMixin:
             self._data_selection_mask = None
             self._data_draft = []
             self._data_drag_end = None
+        if cube is not self._data_cube:
+            self._data_grayscale_limits = None
         self._data_cube = cube
         self._data_circle_radius = max(1, min(self._data_circle_radius, max(cube.shape[:2])))
         self._data_wavelengths = np.asarray(wavelengths)
@@ -424,12 +456,22 @@ class DataMixin:
             return
         rgb = self.data_display.currentData() == 'rgb'
         self.data_band.setEnabled(not rgb)
+        if self._data_grayscale_limits is None:
+            self._data_grayscale_limits = grayscale_limits(self._data_cube)
+        _, reference_white = self._data_grayscale_limits
+        low = reference_white * self.data_low_cut.value() / 100.
+        high = reference_white * self.data_high_cut.value() / 100.
+        self.data_band_label.setToolTip(f'Display range: {low:g} to {high:g}')
         if rgb:
-            self._ab_base_bgr, actual = make_rgb_preview(self._data_cube, self._data_wavelengths)
+            self._ab_base_bgr, actual = make_rgb_preview(
+                self._data_cube, self._data_wavelengths,
+                targets=NIREOS_RGB_WAVELENGTHS, limits=(low, high),
+            )
             caption = 'RGB ' + ' / '.join(f'{value:g}' for value in actual) + ' nm'
         else:
             index = self.data_band.value()
-            channel = stretch_display_band(self._data_cube[:, :, index])
+            band = self._data_cube[:, :, index]
+            channel = scale_display_band(band, low, high)
             self._ab_base_bgr = cv2.cvtColor(channel, cv2.COLOR_GRAY2BGR)
             caption = f'{self._data_wavelengths[index]:g} nm'
         self.data_band_label.setText(caption)

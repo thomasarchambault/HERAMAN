@@ -21,11 +21,11 @@ import pyqtgraph as pg
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt5.QtCore import QEvent, QObject, QProcess, Qt, QTimer
-from PyQt5.QtGui import QColor, QFont, QImage, QIntValidator, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QFont, QImage, QIntValidator, QKeySequence, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QColorDialog, QComboBox, QFileDialog, QGridLayout,
     QGroupBox, QHBoxLayout, QLabel, QLayout, QLineEdit, QMessageBox,
-    QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSlider, QTabWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QShortcut, QSizePolicy, QSlider, QTabWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -51,7 +51,6 @@ class MainGUI(
         super().__init__()
         self.runtime = load_runtime_settings()
         self.setWindowTitle("HERAMAN — HERA spectral analysis")
-        self.resize(1200, 900)
         self._should_abort = False
         self._proc_pp = None  
         self._proc_roi = None
@@ -104,7 +103,27 @@ class MainGUI(
 
         self._build_ui()
 
+        available = self.screen().availableGeometry()
+        self.resize(min(1200, available.width() * 9 // 10),
+                    min(900, available.height() * 9 // 10))
+        self.move(available.center() - self.rect().center())
+
         self.corrected_root_dir = getattr(self, "corrected_root_dir", str(PROJECT_ROOT / "results"))
+
+    def _toggle_full_screen(self):
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            full_screen = self.isFullScreen()
+            self._exit_full_screen_shortcut.setEnabled(full_screen)
+            self._full_screen_button.setText(
+                "Exit full screen (Esc)" if full_screen else "Full screen (F11)"
+            )
 
     def _safe_set_pixmap(self, label_attr: str, pix: QPixmap):
         """Pose un pixmap dans un QLabel si le QLabel existe."""
@@ -122,6 +141,14 @@ class MainGUI(
 
         self.tabs = QTabWidget(self)
         self.tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._full_screen_button = QPushButton("Full screen (F11)", self.tabs)
+        self._full_screen_button.clicked.connect(self._toggle_full_screen)
+        self.tabs.setCornerWidget(self._full_screen_button)
+        QShortcut(QKeySequence(Qt.Key_F11), self, activated=self._toggle_full_screen)
+        self._exit_full_screen_shortcut = QShortcut(
+            QKeySequence(Qt.Key_Escape), self, activated=self.showNormal
+        )
+        self._exit_full_screen_shortcut.setEnabled(False)
 
         # Tabs assembled from factories (everything grouped)
         tab_pp   = self._make_postproc_tab()

@@ -409,14 +409,18 @@ class PostProcessingMixin(PostprocessingModelsMixin):
             candidates = root.rglob('*')
             sources = {str(p.resolve()) for p in candidates if p.is_file() and p.suffix.lower() == '.hdr'}
         sources = {os.path.normcase(value): value for value in sources}
-        paths = sorted(sources.values(), key=lambda value: Path(value).name.casefold())
-        if folder == "external" and selected_path and Path(selected).is_file() and selected not in paths:
-            paths.insert(0, selected)
+        paths = sorted(
+            (value for value in sources.values() if Path(value).name.casefold().endswith("_nrm.hdr")),
+            key=lambda value: Path(value).name.casefold(),
+        )
         self.combo_pp_cube.blockSignals(True)
         self.combo_pp_cube.clear()
         for path in paths:
-            self.combo_pp_cube.addItem(f"{Path(path).parent.name} / {Path(path).name}", path)
-        self.combo_pp_cube.setCurrentIndex(max(0, self.combo_pp_cube.findData(selected)))
+            label = f"{Path(path).parent.name} / {Path(path).name}"
+            self.combo_pp_cube.addItem(label, path)
+            self.combo_pp_cube.setItemData(self.combo_pp_cube.count() - 1, label, Qt.ToolTipRole)
+        index = self.combo_pp_cube.findData(sources.get(os.path.normcase(selected), selected))
+        self.combo_pp_cube.setCurrentIndex(index if selected_path else max(0, index))
         self.combo_pp_cube.blockSignals(False)
         self._update_pp_cube_path()
 
