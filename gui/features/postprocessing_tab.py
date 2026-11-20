@@ -53,6 +53,12 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.btn_load_pp = QPushButton("Open saved results...")
         self.btn_run_pp = QPushButton("Classify ENVI cube")
 
+        self.visualisation_mode = QComboBox()
+        self.visualisation_mode.addItem("Visualisation only", False)
+        self.visualisation_mode.addItem("Segmentation and classification", True)
+        left.addWidget(QLabel("Mode"))
+        left.addWidget(self.visualisation_mode)
+
         outer_sel = QVBoxLayout()
         outer_sel.setSpacing(10)
         source_box = QGroupBox("1. Input data")
@@ -83,10 +89,10 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.pp_cube_path_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         corrected.addWidget(self.pp_cube_path_label)
         self.btn_browse_pp_cube = QPushButton("Browse cube...")
-        corrected.addWidget(self.btn_browse_pp_cube)
         self.btn_view_cube = QPushButton("Open cube without classification")
         self.btn_view_cube.clicked.connect(self._view_selected_cube)
         corrected.addWidget(self.btn_view_cube)
+        corrected.addWidget(self.btn_browse_pp_cube)
         note = QLabel("Native resolution. No white/dark or shading correction is applied.")
         note.setWordWrap(True)
         corrected.addWidget(note)
@@ -285,6 +291,18 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         sel.addWidget(self.pp_norm_box)
         self._init_pp_model_status(sel)
 
+        def change_mode():
+            enabled = self.visualisation_mode.currentData()
+            for widget in (model_box, tissue_box, actions, self.pp_svm_training_status,
+                           self.pp_process_status, self.log_output):
+                widget.setVisible(enabled)
+            self.btn_view_cube.setText("Open cube without classification" if enabled else "Open cube")
+            self.combo_pp_source.setVisible(enabled)
+            left_scroll.setMinimumWidth(440 if enabled else 260)
+            self._set_overlay_classification_mode(enabled)
+
+        self.visualisation_mode.currentIndexChanged.connect(change_mode)
+        change_mode()
         return tab
 
     def _update_pp_source_mode(self, _index=0):
@@ -377,7 +395,6 @@ class PostProcessingMixin(PostprocessingModelsMixin):
 
     def _refresh_pp_cube_choices(self, _checked=False, selected_path=None):
         selected = str(selected_path or self.combo_pp_cube.currentData() or "")
-        from shared.envi_catalog import registered_sources
         ENVI_FILES_DIR.mkdir(parents=True, exist_ok=True)
         folders = sorted((p for p in ENVI_FILES_DIR.iterdir() if p.is_dir()),
                          key=lambda p: p.relative_to(ENVI_FILES_DIR).as_posix().casefold())
@@ -392,25 +409,23 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         ]
         if root_cubes:
             choices.append(("ENVI files (root)", str(envi_root)))
-        choices.append(("External / imported files", "external"))
         folder = self.combo_pp_folder.currentData()
-        if selected_path:
-            source = Path(selected_path).resolve()
-            matches = [value for _, value in choices if value != "external" and
-                       source.is_relative_to(Path(value))]
-            folder = max(matches, key=lambda value: len(Path(value).parts), default="external")
+        browsed_only = False
+        if selected_path or (folder is None and selected):
+            source = Path(selected).resolve()
+            matches = [value for _, value in choices if source.is_relative_to(Path(value))]
+            folder = max(matches, key=lambda value: len(Path(value).parts), default=None)
+            browsed_only = folder is None
         self.combo_pp_folder.blockSignals(True)
         self.combo_pp_folder.clear()
         for label, value in choices:
             self.combo_pp_folder.addItem(label, value)
-        self.combo_pp_folder.setCurrentIndex(max(0, self.combo_pp_folder.findData(folder)))
+        self.combo_pp_folder.setCurrentIndex(-1 if browsed_only else max(0, self.combo_pp_folder.findData(folder)))
         self.combo_pp_folder.blockSignals(False)
         folder = self.combo_pp_folder.currentData()
-        self.combo_pp_folder.setToolTip(str(folder))
-        if folder == "external":
-            roots = [Path(value) for _, value in choices if value != "external"]
-            sources = {value for value in registered_sources()
-                       if not any(Path(value).is_relative_to(root) for root in roots)}
+        self.combo_pp_folder.setToolTip(str(folder or ""))
+        if folder is None:
+            sources = [selected] if browsed_only else []
         elif folder == str(envi_root):
             sources = root_cubes
         else:
@@ -418,10 +433,16 @@ class PostProcessingMixin(PostprocessingModelsMixin):
             candidates = root.rglob('*')
             sources = {str(p.resolve()) for p in candidates if p.is_file() and p.suffix.lower() == '.hdr'}
         sources = {os.path.normcase(value): value for value in sources}
+        synthetic_roots = (
+            (ENVI_FILES_DIR / 'synthetic_data').resolve(),
+            (PROJECT_ROOT / 'synthetic_data').resolve(),
+        )
         dated_paths = []
         for path in sources.values():
             header = Path(path)
-            if not header.name.casefold().endswith("_nrm.hdr"):
+            # Generated scenes are already usable cubes and have no _nrm suffix.
+            is_synthetic = any(header.is_relative_to(root) for root in synthetic_roots)
+            if not header.name.casefold().endswith("_nrm.hdr") and not is_synthetic and not browsed_only:
                 continue
             try:
                 info = header.stat()
@@ -444,7 +465,7 @@ class PostProcessingMixin(PostprocessingModelsMixin):
 
     def _envi_browse_directory(self):
         folder = self.combo_pp_folder.currentData()
-        return str(ENVI_FILES_DIR) if not folder or folder == "external" else folder
+        return str(ENVI_FILES_DIR) if not folder else folder
 
     def _browse_pp_cube(self):
         path, _ = QFileDialog.getOpenFileName(self, "Choose an ENVI cube",

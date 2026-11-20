@@ -45,6 +45,7 @@ from shared.probability_colors import probability_rgb
 class OverlayMixin:
     def _make_abundance_overlay_tab(self, *, embedded: bool = False) -> QWidget:
 
+        classification_visible = True
         tab = QWidget()
         root = QVBoxLayout(tab)
         root.setContentsMargins(8 if embedded else 10, 8 if embedded else 10, 8 if embedded else 10, 8 if embedded else 10)
@@ -353,6 +354,12 @@ class OverlayMixin:
         spectrum_controls.addWidget(self.ab_spectrum_mode)
         spectrum_controls.addWidget(self.ab_resume_hover)
         right.addLayout(spectrum_controls)
+        self.display_normalization = QComboBox()
+        for label, value in (("Raw spectrum", "none"), ("−log₁₀(R)", "log_reflectance"), ("SNV", "snv"),
+                             ("Min-max", "minmax")):
+            self.display_normalization.addItem(label, value)
+        self.display_normalization.setToolTip("Transform the displayed spectrum. For −log₁₀(R), R is the reflectance stored in the cube.")
+        right.addWidget(self.display_normalization)
         right.addWidget(self.ab_spectrum_normalization)
         self.ab_show_reference = QCheckBox("Class mean ± standard deviation ⓘ")
         self.ab_show_reference.setChecked(True)
@@ -365,11 +372,12 @@ class OverlayMixin:
         self.cb_ab_fixed_axes = QCheckBox("Fix axes to cube scale")
         self.cb_ab_fixed_axes.setToolTip(
             "Checked: use the same signal scale across the cube to compare pixels.\n"
+            "For −log₁₀(R), the fixed range includes zero and the sampled 1st–99th percentiles.\n"
             "The native signal axis is capped at 2; values above 2 are outside the plot.\n"
             "Unchecked: fit the vertical axis to the displayed spectrum and visible class reference.\n"
             "Only the display scale changes; spectral values are preserved."
         )
-        self.cb_ab_fixed_axes.setChecked(False)
+        self.cb_ab_fixed_axes.setChecked(True)
         right.addWidget(self.cb_ab_fixed_axes, 0)
         right.addWidget(self.ab_hover_label, 0)
 
@@ -439,9 +447,11 @@ class OverlayMixin:
             self._ab_spectrum_cursor.set_data([wavelength],[intensity])
             annotation = self._ab_spectrum_annotation
             annotation.xy = (wavelength,intensity)
-            normalized = self.ab_spectrum_normalization.currentData() == 'model'
+            normalized = classification_visible and self.ab_spectrum_normalization.currentData() == 'model'
             context = getattr(self,'_ab_spectrum_context',None)
             mode = context['mode'] if normalized and context else 'raw'
+            if not classification_visible:
+                mode = self.display_normalization.currentText()
             if mode == 'snv_three_ratios':
                 mode = 'SNV (3-ratio model)'
             unit = 'nm' if self._ab_wavelengths is not None else '(band)'
@@ -820,7 +830,7 @@ class OverlayMixin:
             r = self._ab_hover_radius
             patch = cube[max(0,y-r):min(h,y+r+1), max(0,x-r):min(w,x+r+1)]
             context = getattr(self, '_ab_spectrum_context', None)
-            normalized = self.ab_spectrum_normalization.currentData() == 'model' and context is not None
+            normalized = classification_visible and self.ab_spectrum_normalization.currentData() == 'model' and context is not None
             refs = self._ab_references
             wl = _band_to_wl(bands)
             if normalized:
@@ -834,6 +844,11 @@ class OverlayMixin:
                     _, self._ab_normalized_refs = class_references(cube,self._ab_abund,
                         normalization_mode=context['mode'],band_indices=indices)
                 refs = self._ab_normalized_refs
+            display_mode = 'none' if classification_visible else self.display_normalization.currentData()
+            manual = display_mode in ('snv', 'minmax', 'log_reflectance')
+            if manual:
+                from shared.spectrum_normalization import normalize_display_block
+                patch = normalize_display_block(patch, self.display_normalization.currentData())
             finite = np.isfinite(patch)
             counts = finite.sum(axis=(0, 1))
             spec = np.divide(np.where(finite, patch, 0).sum(axis=(0, 1), dtype=np.float64),
@@ -842,16 +857,16 @@ class OverlayMixin:
             mode = "Pixel" if r == 0 else f"{patch.shape[1]} × {patch.shape[0]} mean"
             self._ab_spec_line.set_data(wl, spec)
             self._ab_spec_line.set_label(mode)
-            labels = self._ab_class_map
+            labels = self._ab_class_map if classification_visible else None
             k = int(labels[y, x]) if labels is not None else -1
             names = self._ab_names or []
             name = names[k] if 0 <= k < len(names) else f"component {k}" if k >= 0 else "Unclassified" if self._ab_abund is None else "Unassigned / ambiguous"
             state = "Held" if self._ab_pinned else "Live"
             mixed = (r > 0 and labels is not None and
                      np.any(labels[max(0,y-r):min(h,y+r+1), max(0,x-r):min(w,x+r+1)] != k))
-            self.ab_hover_label.setText(f"{state} · x={x}, y={y} · {name} · {mode}" +
+            self.ab_hover_label.setText(f"{state} · x={x}, y={y} · {mode}" + (f" · {name}" if classification_visible else "") +
                                        (" · mixed-class window" if mixed else ""))
-            if self._ab_decision is not None:
+            if classification_visible and self._ab_decision is not None:
                 decision = self._ab_decision
                 gap = float(decision['gap'][y, x])
                 if np.isfinite(gap):
@@ -862,14 +877,18 @@ class OverlayMixin:
                     self.ab_hover_label.setText(self.ab_hover_label.text() + detail)
                 else:
                     self.ab_hover_label.setText(self.ab_hover_label.text() + "\nDecision score unavailable for this pixel")
-            if self._ab_probability is not None:
+            if classification_visible and self._ab_probability is not None:
                 p = self._ab_probability[y, x]
                 code = _selective_map()[y,x]
                 label = {-1: 'excluded', 0: 'non-fat', 1: 'fat', 2: 'unsure'}[int(code)]
                 self.ab_hover_label.setText(self.ab_hover_label.text() + f"\nPlatt P(fat)={p:.3f} · displayed decision: {label}")
             mode_label = 'SNV (3-ratio model)' if normalized and context['mode'] == 'snv_three_ratios' else context['mode'] if normalized else ''
-            ax.set_title(('Normalized · ' + mode_label) if normalized else 'Selected spectrum' if self._ab_abund is None else 'Selected spectrum and class reference', fontsize=11)
-            ax.set_ylabel('Normalized spectral value' if normalized else 'Signal (native cube values)')
+            ax.set_title(('Normalized · ' + mode_label) if normalized else 'Selected spectrum' if not classification_visible or self._ab_abund is None else 'Selected spectrum and class reference', fontsize=11)
+            if manual:
+                ax.set_title(self.display_normalization.currentText(), fontsize=11)
+            ax.set_ylabel('Normalized spectral value' if normalized or manual else 'Signal (native cube values)')
+            if display_mode == 'log_reflectance':
+                ax.set_ylabel('−log₁₀(R)')
             ax.set_xlabel("Wavelength (nm)" if self._ab_wavelengths is not None else "Band index")
             bounds = [spec]
             ref = refs.get(k)
@@ -899,7 +918,25 @@ class OverlayMixin:
             if values.size:
                 lo, hi = float(values.min()), float(values.max())
                 if self.cb_ab_fixed_axes.isChecked():
-                    if normalized:
+                    if display_mode == 'minmax':
+                        lo, hi = 0., 1.
+                    elif display_mode == 'log_reflectance':
+                        if display_mode not in self._spectrum_display_limits:
+                            from shared.spectrum_normalization import log_reflectance_plot_limits
+                            self._spectrum_display_limits[display_mode] = log_reflectance_plot_limits(cube)
+                        lo, hi = self._spectrum_display_limits[display_mode]
+                    elif display_mode == 'snv':
+                        if display_mode not in self._spectrum_display_limits:
+                            lower, upper = np.inf, -np.inf
+                            for row in range(0, h, 16):
+                                block = normalize_display_block(cube[row:row+16], display_mode)
+                                finite = block[np.isfinite(block)]
+                                if finite.size:
+                                    lower = min(lower, float(finite.min()))
+                                    upper = max(upper, float(finite.max()))
+                            self._spectrum_display_limits[display_mode] = (lower, upper)
+                        lo, hi = self._spectrum_display_limits[display_mode]
+                    elif normalized:
                         all_bounds = np.concatenate([np.r_[ref['mean']-ref['std'],ref['mean']+ref['std']] for ref in refs.values()]) if refs else values
                         lo, hi = float(np.nanmin(all_bounds)), float(np.nanmax(all_bounds))
                     else:
@@ -910,9 +947,10 @@ class OverlayMixin:
                     lo = min(0.0, hi - 1.0)
                 pad = max((hi-lo)*.06, abs(hi)*.01, 1e-6)
                 upper = hi + pad
-                if self.cb_ab_fixed_axes.isChecked() and not normalized:
+                if self.cb_ab_fixed_axes.isChecked() and not (normalized or manual):
                     upper = min(upper, 2.0)
-                ax.set_ylim(lo-pad, upper)
+                lower = 0. if self.cb_ab_fixed_axes.isChecked() and display_mode == 'log_reflectance' and lo == 0 else lo-pad
+                ax.set_ylim(lower, upper)
             handles = [self._ab_spec_line]
             if self._ab_ref_band is not None:
                 handles.extend([self._ab_ref_line, self._ab_ref_band])
@@ -945,8 +983,9 @@ class OverlayMixin:
             return img_bgr
 
         def _draw_hover_box(img_bgr: np.ndarray) -> np.ndarray:
-            img_bgr = _apply_decision_display(img_bgr)
-            if self._ab_tissue_mask is not None and self.ab_show_tissue_mask.isChecked():
+            if classification_visible:
+                img_bgr = _apply_decision_display(img_bgr)
+            if classification_visible and self._ab_tissue_mask is not None and self.ab_show_tissue_mask.isChecked():
                 from shared.tissue_segmentation import draw_dashed_boundary
                 img_bgr = draw_dashed_boundary(img_bgr, self._ab_tissue_mask)
             img_bgr = self._draw_data_selection(img_bgr)
@@ -979,7 +1018,7 @@ class OverlayMixin:
                 return
 
             base = self._ab_base_bgr.copy()
-            abund = self._ab_abund
+            abund = self._ab_abund if classification_visible else None
 
             if self.ab_display_mode.currentData() in ('fat_selective', 'fat_probability') and self._ab_probability is not None:
                 pix = _np_bgr_to_qpix(_draw_hover_box(base))
@@ -1365,8 +1404,8 @@ class OverlayMixin:
         def _on_display_mode():
             mode = self.ab_display_mode.currentData()
             platt = mode in ('fat_selective', 'fat_probability')
-            self.ab_ambiguity_legend.setVisible(platt and self._ab_probability is not None)
-            self.ab_probability_scale.setVisible(mode == 'fat_probability' and self._ab_probability is not None)
+            self.ab_ambiguity_legend.setVisible(classification_visible and platt and self._ab_probability is not None)
+            self.ab_probability_scale.setVisible(classification_visible and mode == 'fat_probability' and self._ab_probability is not None)
             self.ab_ambiguity_legend.setText(
                 'Platt heatmap: continuous P(fat), 0 to 1 (Turbo). Colours represent probabilities, not tissue classes.'
                 if mode == 'fat_probability' else
@@ -1492,6 +1531,19 @@ class OverlayMixin:
             self.ab_folder_label.setText(Path(path).name + ' · unclassified cube')
             self.ab_view_label.reset_view()
 
+        self.display_normalization.currentIndexChanged.connect(_refresh_spectrum)
+
+        def set_classification_mode(enabled):
+            nonlocal classification_visible
+            classification_visible = enabled
+            self.display_normalization.setVisible(not enabled)
+            for widget in (controls_group, grp, self.ab_spectrum_normalization,
+                           self.ab_show_reference, self.ab_reference_info):
+                widget.setVisible(enabled)
+            _on_display_mode()
+            _refresh_spectrum()
+
+        self._set_overlay_classification_mode = set_classification_mode
         self._show_unclassified_cube = _show_unclassified_cube
         self._render_spectral_image = _render
         self._plot_pixel_spectrum = _plot_spectrum_at

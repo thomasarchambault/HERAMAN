@@ -120,6 +120,7 @@ class DataMixin:
             self._data_drag_end = None
         if cube is not self._data_cube:
             self._data_grayscale_limits = None
+            self._spectrum_display_limits = {}
         self._data_cube = cube
         self._data_circle_radius = max(1, min(self._data_circle_radius, max(cube.shape[:2])))
         self._data_wavelengths = np.asarray(wavelengths)
@@ -129,7 +130,7 @@ class DataMixin:
         self.data_band.blockSignals(True)
         self.data_band.setRange(0, len(wavelengths)-1)
         self.data_band.blockSignals(False)
-        self.data_info.setText(f'{Path(path).name} | {cube.shape} | {wavelengths[0]:g}–{wavelengths[-1]:g} nm | original values')
+        self.data_info.setText(f'{Path(path).name} | {cube.shape} | {wavelengths[0]:g}–{wavelengths[-1]:g} nm')
         self.pp_tissue_band.setValue(float(wavelengths[np.argmin(abs(wavelengths-self.pp_tissue_band.value()))]))
         self._draw_data()
 
