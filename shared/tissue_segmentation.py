@@ -104,6 +104,27 @@ def erode_tissue_mask(mask, radius_px):
     return binary_erosion(mask, structure=x*x+y*y <= radius_px*radius_px, border_value=0)
 
 
+def otsu_candidates(image, valid, log_intensity):
+    """Return the quantized Otsu partition and the threshold in native units."""
+    values = image[valid]
+    if not values.size:
+        raise ValueError("No finite intensities on this band.")
+    working = np.log1p(np.maximum(values, 0)) if log_intensity else values
+    low, high = float(working.min()), float(working.max())
+    if high <= low:
+        raise ValueError("Image constante : segmentation Otsu impossible ; régler un seuil manuel.")
+    scaled = np.clip((working-low)/(high-low)*65535, 0, 65535).astype(np.uint16)
+    otsu, _ = cv2.threshold(scaled.reshape(-1, 1), 0, 65535, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    threshold = low + otsu/65535*(high-low)
+    if log_intensity:
+        threshold = float(np.expm1(threshold))
+    # Use exactly the quantized partition used by Otsu. Converting its
+    # threshold back to float can round just below a constant background.
+    candidates = np.zeros(image.shape, dtype=bool)
+    candidates[valid] = scaled > otsu
+    return candidates, threshold
+
+
 def intensity_tissue_mask(mean, valid, args):
     """Choose largest component not touching image edges, fill holes, then erode.
 
@@ -114,24 +135,11 @@ def intensity_tissue_mask(mean, valid, args):
     valid = np.asarray(valid, dtype=bool)
     if mean.ndim != 2 or valid.shape != mean.shape or not valid.any():
         raise ValueError("Image d'intensité ou masque de validité invalide.")
-    values = mean[valid]
     if args.segmentation_method == "threshold":
         threshold = args.segmentation_threshold
         candidates = valid & (mean > threshold)
     else:
-        working = np.log1p(np.maximum(values, 0)) if args.segmentation_log_intensity else values
-        low, high = float(working.min()), float(working.max())
-        if high <= low:
-            raise ValueError("Image constante : segmentation Otsu impossible ; régler un seuil manuel.")
-        scaled = np.clip((working-low)/(high-low)*65535, 0, 65535).astype(np.uint16)
-        otsu, _ = cv2.threshold(scaled.reshape(-1, 1), 0, 65535, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-        threshold = low + otsu/65535*(high-low)
-        if args.segmentation_log_intensity:
-            threshold = float(np.expm1(threshold))
-        # Use exactly the quantized partition used by Otsu. Converting its
-        # threshold back to float can round just below a constant background.
-        candidates = np.zeros(mean.shape, dtype=bool)
-        candidates[valid] = scaled > otsu
+        candidates, threshold = otsu_candidates(mean, valid, args.segmentation_log_intensity)
     components, count = label(candidates, structure=np.ones((3, 3), dtype=bool))
     if not count:
         raise ValueError(f"Aucun échantillon au-dessus du seuil {threshold:.4g}.")

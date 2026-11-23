@@ -176,7 +176,7 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.cb_pp_log_otsu = QCheckBox("Otsu on log intensity")
         self.cb_pp_log_otsu.setChecked(True)
         self.pp_tissue_threshold = QDoubleSpinBox()
-        self.pp_tissue_threshold.setRange(-1e6, 1e9); self.pp_tissue_threshold.setDecimals(4); self.pp_tissue_threshold.setValue(10)
+        self.pp_tissue_threshold.setRange(-1e6, 1e9); self.pp_tissue_threshold.setDecimals(12); self.pp_tissue_threshold.setValue(10)
         self.pp_tissue_threshold.setToolTip("Threshold in the scientific cube's native intensity units.")
         self.pp_tissue_erosion = QSpinBox()
         self.pp_tissue_erosion.setRange(0, 100); self.pp_tissue_erosion.setValue(5); self.pp_tissue_erosion.setSuffix(" px")
@@ -187,8 +187,8 @@ class PostProcessingMixin(PostprocessingModelsMixin):
             tissue_form.addWidget(QLabel(label), row, 0)
             tissue_form.addWidget(widget, row, 1)
         tissue_form.addWidget(self.cb_pp_log_otsu, 5, 0, 1, 2)
-        self.btn_preview_tissue = QPushButton("Preview sample mask...")
-        self.btn_preview_tissue.setToolTip("Compute the mask on the selected corrected cube, without training or classifying. Dashed cyan: retained sample boundary.")
+        self.btn_preview_tissue = QPushButton("Edit sample objects...")
+        self.btn_preview_tissue.setToolTip("Adjust the threshold, select objects and split touching regions before classification.")
         self.btn_preview_tissue.clicked.connect(self._preview_tissue_mask)
         tissue_form.addWidget(self.btn_preview_tissue, 6, 0, 1, 2)
         tissue_layout.addWidget(self.pp_tissue_controls)
@@ -317,75 +317,76 @@ class PostProcessingMixin(PostprocessingModelsMixin):
         self.pp_tissue_threshold.setEnabled(manual)
         self.cb_pp_log_otsu.setEnabled(not manual)
 
+    def _sample_editor_key(self, path):
+        from shared.envi import resolve_envi_binary, _read_header_fields
+        if not path.is_file():
+            return None
+        binary = resolve_envi_binary(path, _read_header_fields(path))
+        info = path.stat()
+        data = binary.stat() if binary.is_file() else None
+        return (path.resolve(), info.st_size, info.st_mtime_ns, binary,
+                (data.st_size, data.st_mtime_ns) if data else None, self.pp_tissue_band.value(),
+                self.combo_pp_segmentation.currentData(), self.pp_tissue_threshold.value(),
+                self.cb_pp_log_otsu.isChecked(), self.pp_tissue_erosion.value())
+
     def _preview_tissue_mask(self):
-        from types import SimpleNamespace
+        from tempfile import TemporaryDirectory
+        from uuid import uuid4
         from shared.envi import load_spectral_cube
-        from shared.tissue_segmentation import segment_cube, draw_dashed_boundary, segmentation_band_index
+        from shared.tissue_segmentation import otsu_candidates, segmentation_band_index
+        from gui.features.mask_editor import MaskEditor
+
         path = Path(str(self.combo_pp_cube.currentData() or ""))
         if not path.is_file():
-            QMessageBox.warning(self, "Tissue mask", "Select a corrected cube first.")
-            return
-        cube = None
+            QMessageBox.warning(self, "Segmentation", "Select a corrected cube first.")
+            return False
+        editor = None
         try:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
+            key = self._sample_editor_key(path)
             cube, wavelengths = load_spectral_cube(path)
-            args = SimpleNamespace(segmentation_band_nm=self.pp_tissue_band.value(),
-                segmentation_method=self.combo_pp_segmentation.currentData(),
-                segmentation_threshold=self.pp_tissue_threshold.value(),
-                segmentation_log_intensity=self.cb_pp_log_otsu.isChecked(),
-                tissue_mask_erosion_px=self.pp_tissue_erosion.value())
-            band = segmentation_band_index(wavelengths, args.segmentation_band_nm)
-            actual_band_nm = float(wavelengths[band])
-            _, mask, threshold, fallback = segment_cube(cube, wavelengths, args)
-            if not mask.any():
-                raise ValueError("Empty mask after erosion. Adjust the threshold or reduce erosion.")
-            base = None
-            from shared.corrected_layout import nearby_image_folders
-            for folder in nearby_image_folders(path):
-                candidate = read_image(str(folder/'base_image_bgr.png')) if (folder/'base_image_bgr.png').is_file() else None
-                if candidate is not None and candidate.shape[:2] == mask.shape:
-                    base = candidate
-                    break
-            if base is None:
-                intensity = np.asarray(cube[:, :, band], dtype=np.float32)
-                low, high = np.nanpercentile(intensity, [1, 99])
-                gray = np.nan_to_num(np.clip((intensity-low)/max(float(high-low), 1e-6), 0, 1))*255
-                base = cv2.cvtColor(gray.astype(np.uint8), cv2.COLOR_GRAY2BGR)
-            preview = draw_dashed_boundary(base, mask)
-        except Exception as exc:
-            QMessageBox.warning(self, "Tissue mask preview", str(exc))
-            return
+            try:
+                index = segmentation_band_index(wavelengths, self.pp_tissue_band.value())
+                band = np.array(cube[:, :, index], dtype=np.float32, copy=True)
+            finally:
+                if isinstance(cube, np.memmap):
+                    cube._mmap.close()
+
+            threshold = self.pp_tissue_threshold.value()
+            candidates = None
+            if self.combo_pp_segmentation.currentData() == "otsu":
+                valid = np.isfinite(band)
+                candidates, threshold = otsu_candidates(band, valid, self.cb_pp_log_otsu.isChecked())
+                rejected = band[valid & ~candidates]
+                if rejected.size:
+                    threshold = float(rejected.max())
+            prior = getattr(self, '_sample_editor_state', None)
+            previous = prior[2] if prior and prior[0] == key else None
+            editor = MaskEditor(self, band, threshold, self.pp_tissue_erosion.value(), previous,
+                                band_nm=float(wavelengths[index]), otsu_mask=candidates)
+            if editor.exec_() != QDialog.Accepted:
+                return False
+            if self._sample_editor_key(path) != key:
+                raise ValueError("The cube or segmentation settings changed while editing.")
+            if not hasattr(self, '_sample_editor_dir'):
+                self._sample_editor_dir = TemporaryDirectory(prefix='heraman-mask-')
+            filename = Path(self._sample_editor_dir.name) / (uuid4().hex + '.npz')
+            np.savez_compressed(filename, labels=editor.labels, source=str(path.resolve()),
+                                minimum_area=editor.area.value(),
+                                cuts=np.asarray(editor.cuts, dtype=np.int64).reshape(-1, 2, 2),
+                                band_nm=float(wavelengths[index]))
+            if not editor.uses_otsu():
+                self.combo_pp_segmentation.setCurrentIndex(self.combo_pp_segmentation.findData('threshold'))
+            self.pp_tissue_threshold.setValue(editor.threshold.value())
+            self.pp_tissue_erosion.setValue(editor.erosion.value())
+            self._sample_editor_state = (self._sample_editor_key(path), filename,
+                                         (editor.cuts, editor.selected_points, editor.area.value()))
+            return True
+        except (OSError, ValueError, KeyError) as exc:
+            QMessageBox.warning(self, "Segmentation", str(exc))
+            return False
         finally:
-            if isinstance(cube, np.memmap):
-                cube._mmap.close()
-            QApplication.restoreOverrideCursor()
-        previous = getattr(self, '_pp_mask_preview', None)
-        if previous is not None:
-            previous.close()
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Tissue mask preview - no classification")
-        layout = QVBoxLayout(dialog)
-        details = QLabel(f"{path.name}\n{actual_band_nm:g} nm (requested: {args.segmentation_band_nm:g} nm) | {args.segmentation_method} | threshold={threshold:.5g} | erosion={args.tissue_mask_erosion_px}px\n"
-                         f"Retained: {int(mask.sum()):,}/{mask.size:,} pixels. Dashed cyan: boundary after erosion.")
-        details.setWordWrap(True)
-        layout.addWidget(details)
-        if fallback:
-            layout.addWidget(QLabel("All components touch the frame: inspect the selected region carefully."))
-        image = ResizablePixmapLabel()
-        image.setAlignment(Qt.AlignCenter)
-        image.setMinimumSize(320, 240)
-        image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        height, width = preview.shape[:2]
-        rgb = np.ascontiguousarray(preview[:, :, ::-1])
-        qimage = QImage(rgb.data, width, height, width*3, QImage.Format_RGB888).copy()
-        image.setPixmap(QPixmap.fromImage(qimage))
-        layout.addWidget(image, 1)
-        close = QPushButton("Close preview")
-        close.clicked.connect(dialog.close)
-        layout.addWidget(close)
-        dialog.resize(900, 850)
-        self._pp_mask_preview = dialog
-        dialog.show()
+            if editor is not None:
+                editor.deleteLater()
 
     def _update_pp_cube_path(self, _index=0):
         path = str(self.combo_pp_cube.currentData() or "")
@@ -994,6 +995,11 @@ class PostProcessingMixin(PostprocessingModelsMixin):
             "--model_path", str(profile_paths["model"]),
         ]
         if self.cb_pp_tissue_only.isChecked():
+            state = getattr(self, '_sample_editor_state', None)
+            if not state or state[0] != self._sample_editor_key(Path(cube_path)) or not state[1].is_file():
+                if not self._preview_tissue_mask():
+                    return
+            args += ["--object_mask", str(self._sample_editor_state[1])]
             args += ["--tissue_only", "--segmentation_band_nm", str(self.pp_tissue_band.value()),
                      "--segmentation_method", str(self.combo_pp_segmentation.currentData()),
                      "--segmentation_threshold", str(self.pp_tissue_threshold.value()),
