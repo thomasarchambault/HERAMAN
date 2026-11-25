@@ -168,6 +168,8 @@ class DataMixin:
                 'polygon': 'Left-click vertices; right-click to close. Esc cancels.',
                 'circle': f'Left-click to place a circle. Hold right button + wheel to resize (radius {self._data_circle_radius} px).'}[mode]
         self.data_selection_info.setText(f'{len(self._data_rois)} ROIs · {len(self._data_pixels)} unique pixels — {hint}')
+        if hasattr(self, '_sync_roi_spectrum_checks'):
+            self._sync_roi_spectrum_checks()
 
     def _change_data_selection_mode(self, *_):
         self._data_circle_center = None

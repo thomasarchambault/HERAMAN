@@ -759,7 +759,11 @@ class SvmModelsMixin:
         self.combo_svm_retrain_kernel.setCurrentIndex(1 if svm_type == "rbf" else 0)
         self.combo_svm_retrain_kernel.setEnabled(False)
         self.combo_svm_retrain_kernel.setToolTip("Retraining preserves the selected model kernel and preprocessing.")
-        self.svm_retrain_bands.setText("Selected model bands: " + ", ".join(f"{value:g} nm" for value in selected_wavelengths))
+        next_bands = self._svm_retrain_bands_for_record(record)
+        self.svm_retrain_bands.setText(
+            f"Next retraining ({len(next_bands or [])} bands): "
+            + ", ".join(f"{value:g} nm" for value in (next_bands or []))
+            + f"\nSaved model: {selected_wavelengths.size} bands")
         self.svm_retrain_band_weights.setReadOnly(True)
         self.svm_retrain_band_weights.setText(", ".join(f"{k}={v:g}" for k,v in payload.get("band_weights_by_wavelength", {}).items()))
         can_retrain = record["dataset_path"].is_file()
@@ -1017,7 +1021,7 @@ class SvmModelsMixin:
                 QMessageBox.warning(self, "SVM bands", "The dataset has no saved wavelength axis.")
                 return
             available = [float(value) for value in np.asarray(data["wavelengths"]).reshape(-1)]
-        current = self._load_svm_profile_bands(record["profile"])
+        current = self._svm_retrain_bands_for_record(record)
         initial = ", ".join(f"{value:g}" for value in (current or available))
         text, accepted = QInputDialog.getText(
             self, "SVM spectral bands",
@@ -1045,6 +1049,12 @@ class SvmModelsMixin:
         if hasattr(self, '_queue_pp_model_check'):
             self._queue_pp_model_check()
 
+    def _svm_retrain_bands_for_record(self, record) -> list[float] | None:
+        configured = self._load_svm_profile_bands(record['profile'])
+        if configured is not None:
+            return configured
+        return np.asarray(record['payload'].get('selected_wavelengths', []), dtype=float).tolist() or None
+
     def _retrain_selected_svm_model(self) -> None:
         row = self.svm_dashboard_table.currentRow()
         if row < 0 or self._svm_training_is_running():
@@ -1059,7 +1069,7 @@ class SvmModelsMixin:
         model_path = Path(self.svm_models_dir) / f"{profile}{suffix}"
         kernel = str(record["payload"].get("svm_type", "linear"))
         normalization = str(record["payload"].get("normalization_mode", "none"))
-        selected_bands = np.asarray(record["payload"].get("selected_wavelengths", []), dtype=float).tolist() or None
+        selected_bands = self._svm_retrain_bands_for_record(record)
         selected_cube_ids = self._selected_svm_retrain_cube_ids(dataset_path)
         selected_band_weights = {}  # Weights and preprocessing are cloned from the selected model.
         if not selected_cube_ids:
@@ -1071,6 +1081,8 @@ class SvmModelsMixin:
             "Retrain SVM",
             f"Retrain profile '{profile}' with the {kernel.upper()} kernel?\n\n"
             f"Dataset: {dataset_path}\n"
+            f"Spectral bands ({len(selected_bands or [])}): " + ", ".join(f"{value:g} nm" for value in (selected_bands or [])) + "\n"
+            +
             f"Included cubes ({len(selected_cube_ids)}): " + ", ".join(selected_cube_ids)
             + warning,
             QMessageBox.Yes | QMessageBox.No,
@@ -1086,7 +1098,7 @@ class SvmModelsMixin:
             "--keep_related_models", "--refresh_validation",
             "--reference_model", str(record["path"]),
         ]
-        if self.svm_enable_platt.isChecked(): args.append("--platt")
+        args.append("--platt" if self.svm_enable_platt.isChecked() else "--no-platt")
         if selected_bands:
             args += ["--selected_wavelengths_nm", *[f"{value:g}" for value in selected_bands]]
         for cube_id in selected_cube_ids:
@@ -1108,6 +1120,7 @@ class SvmModelsMixin:
         self._svm_training_started_at = time.monotonic()
         self._svm_training_kernel = kernel.upper()
         self._svm_training_output_buffer = ""
+        self._svm_training_result_path = None
         self._svm_training_decoder = utf8_decoder()
         self._svm_training_steps_state = {
             "validation": "running", "fit": "pending", "save": "pending"
@@ -1143,6 +1156,8 @@ class SvmModelsMixin:
         if not text:
             return
         self.svm_retrain_log.appendPlainText(text)
+        if text.startswith('SVM_MODEL_PATH '):
+            self._svm_training_result_path = Path(text[len('SVM_MODEL_PATH '):].strip())
         if "[SVM][GROUP-CV]" in text and (
             "fold" in text.lower() or "params=" in text or "fallback" in text.lower()
         ):
@@ -1187,6 +1202,16 @@ class SvmModelsMixin:
             self.svm_training_indicator.setStyleSheet("color:#8bd17c; font-weight:700;")
             self.svm_retrain_status.setText("Training completed. Dashboard refreshed.")
             self._refresh_svm_dashboard()
+            result_path = getattr(self, '_svm_training_result_path', None)
+            if result_path is not None:
+                for record in self._svm_all_dashboard_records:
+                    paths = record.get('equivalent_files', [record['path']])
+                    if any(Path(path).resolve() == result_path.resolve() for path in paths):
+                        expanded = set(getattr(self, '_svm_expanded_profiles', set()))
+                        expanded.add(record['profile'])
+                        self._svm_expanded_profiles = expanded
+                        self._render_svm_dashboard(record['path'])
+                        break
             self._refresh_svm_model_choices()
             row = self.svm_dashboard_table.currentRow()
             if row >= 0:

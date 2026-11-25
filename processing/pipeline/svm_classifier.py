@@ -997,16 +997,17 @@ def _make_wavelength_model_path(
     stem = model_path.stem
     suffix = model_path.suffix or ".joblib"
     svm_type = _clean_svm_type(svm_type)
-    stem = re.sub(r"_(?:linear|rbf)(?:_b\d+)?(?:_norm_[a-z_]+)?$", "", stem)
+    stem = re.sub(r"_(?:linear|rbf)(?:_b\d+(?:_[0-9a-f]{16})?)?(?:_norm_[a-z_]+)?$", "", stem)
     wavelengths = np.asarray(matched_wavelengths, dtype=np.float32).reshape(-1)
     normalization_mode = _clean_normalization_mode(normalization_mode)
-    return model_path.with_name(f"{stem}_{svm_type}_b{wavelengths.size}_norm_{normalization_mode}{suffix}")
+    band_key = hashlib.sha256(wavelengths.astype("<f4").tobytes()).hexdigest()[:16]
+    return model_path.with_name(f"{stem}_{svm_type}_b{wavelengths.size}_{band_key}_norm_{normalization_mode}{suffix}")
 
 
 def _model_load_candidates(model_path):
     """New canonical path first, then legacy siblings; compatibility is metadata-based."""
     model_path = Path(model_path)
-    family = re.sub(r"_(?:linear|rbf)(?:_b\d+)?(?:_norm_[a-z_]+)?$", "", model_path.stem)
+    family = re.sub(r"_(?:linear|rbf)(?:_b\d+(?:_[0-9a-f]{16})?)?(?:_norm_[a-z_]+)?$", "", model_path.stem)
     siblings = sorted(model_path.parent.glob(f'{family}_*.joblib'), key=lambda p: p.stat().st_mtime, reverse=True)
     candidates = [model_path, model_path.with_name(family+'.joblib'), *siblings]
     requested = re.search(r'_(linear|rbf)_b(\d+)_norm_([a-z_]+)$', model_path.stem)
@@ -1032,7 +1033,10 @@ def _make_svm_model(
     """Build the shared preprocessing pipeline with the selected SVM kernel."""
     if _REFERENCE_PIPELINE is not None:
         from sklearn.base import clone
-        return clone(_REFERENCE_PIPELINE)
+        model = clone(_REFERENCE_PIPELINE)
+        if 'band_weights' in model.named_steps:
+            model.set_params(band_weights__weights=band_weights)
+        return model
     svm_type = _clean_svm_type(svm_type)
     steps = []
 
@@ -1831,6 +1835,8 @@ def train_svm_from_dataset(
         band_indices = np.asarray(band_indices, dtype=int)
         selected_wavelengths = np.asarray(selected, dtype=np.float32)
 
+    flush_print(f"[SVM][TRAIN] Fitting bands ({len(selected_wavelengths)}): "
+                + ", ".join(f"{value:g}" for value in selected_wavelengths) + " nm")
     prepare_svm_features(np.ones((1,len(selected_wavelengths)),np.float32),selected_wavelengths,normalization_mode)
     training_idx, training_weights, svm_params, grouped_report = _resolve_group_aware_training(
         bundle=bundle,
@@ -2839,7 +2845,7 @@ if __name__ == "__main__":
     parser.add_argument("--normalization_mode", default="none")
     parser.add_argument("--svm_type", choices=sorted(SUPPORTED_SVM_TYPES), default=SVM_TYPE)
     parser.add_argument("--force_retrain", action="store_true")
-    parser.add_argument("--platt", action="store_true", help="Require cube-held-out sigmoid calibration; otherwise save a raw SVM.")
+    parser.add_argument("--platt", action=argparse.BooleanOptionalAction, default=None, help="Require cube-held-out sigmoid calibration; otherwise save a raw SVM.")
     parser.add_argument("--optimize_all_kernels", action="store_true")
     parser.add_argument("--keep_related_models", action="store_true")
     parser.add_argument("--refresh_validation", action="store_true")
@@ -2875,6 +2881,8 @@ if __name__ == "__main__":
     reference = None
     if args.reference_model:
         reference = joblib.load(args.reference_model)
+        if args.platt is None:
+            args.platt = bool(reference.get('platt_calibration'))
         _REFERENCE_PIPELINE = reference['model']
         estimator = _REFERENCE_PIPELINE.named_steps['svm']
         for field, setting in [('scaler_mode','SCALER_MODE'), ('use_pca','USE_PCA'),
@@ -2892,7 +2900,12 @@ if __name__ == "__main__":
         band_weights = reference.get('band_weights_by_wavelength', {}) if reference.get('use_band_weights') else {}
         args.normalization_mode = reference.get('normalization_mode', 'none')
         args.svm_type = reference.get('svm_type', 'linear')
-        args.selected_wavelengths_nm = np.asarray(reference['selected_wavelengths'], dtype=float).tolist()
+        if args.selected_wavelengths_nm is None:
+            args.selected_wavelengths_nm = np.asarray(reference['selected_wavelengths'], dtype=float).tolist()
+
+    if args.selected_wavelengths_nm is not None:
+        flush_print(f"[SVM][TRAIN] Requested bands ({len(args.selected_wavelengths_nm)}): "
+                    + ', '.join(f'{value:g}' for value in args.selected_wavelengths_nm) + ' nm')
 
     trained = train_svm_from_dataset(
         dataset_path=args.dataset_path,
@@ -2908,9 +2921,13 @@ if __name__ == "__main__":
         optimize_all_kernels=args.optimize_all_kernels,
         refresh_validation=args.refresh_validation,
         included_cube_ids=args.included_cube_id,
-        require_platt=args.platt,
+        require_platt=bool(args.platt),
     )
 
     if args.reference_model:
-        _atomic_joblib_dump(trained, Path(args.reference_model))
-        flush_print(f"[SVM][TRAIN] Updated selected variant: {args.reference_model}")
+        if np.array_equal(np.asarray(trained['selected_wavelengths'], dtype=float),
+                          np.asarray(reference['selected_wavelengths'], dtype=float)):
+            _atomic_joblib_dump(trained, Path(args.reference_model))
+            flush_print(f"[SVM][TRAIN] Updated selected variant: {args.reference_model}")
+        else:
+            flush_print(f"[SVM][TRAIN] New band configuration saved separately; reference preserved: {args.reference_model}")

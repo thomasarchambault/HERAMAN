@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from subprocess import PIPE, STDOUT, Popen
 
+from shared.spectrum_normalization import normalize_display_block, normalize_spectra
 import cv2
 from shared.image_io import read_image, write_image
 import joblib
@@ -76,6 +77,11 @@ class OverlayMixin:
         self._ab_hover_xy = None            # (x,y) coords image
         self._ab_hover_radius = 0
         self._ab_pinned = False
+        self._ab_spectrum_pinned_wavelength = None
+        self.ab_roi_checks = {}
+        self._ab_roi_records = {}
+        self._ab_roi_lines = {}
+        self._ab_roi_spectrum_cache = {}
         self._ab_class_map = None
         self._ab_references = {}
         self._ab_decision = None
@@ -305,7 +311,29 @@ class OverlayMixin:
         quick.addWidget(btn_invert)
         grp_layout.addLayout(quick)
 
-        main.addWidget(grp, 0)
+        legend_widget = QWidget()
+        legend_widget.setMinimumWidth(155 if embedded else 170)
+        legend_widget.setMaximumWidth(200 if embedded else 225)
+        legend_layout = QVBoxLayout(legend_widget)
+        legend_layout.setContentsMargins(0, 0, 0, 0)
+        legend_layout.addWidget(grp, 1)
+        self.ab_rois_group = QGroupBox('Selected ROI spectra')
+        roi_layout = QVBoxLayout(self.ab_rois_group)
+        roi_layout.setContentsMargins(6, 12, 6, 4)
+        self.ab_roi_checks_container = QWidget()
+        self.ab_roi_checks_layout = QVBoxLayout(self.ab_roi_checks_container)
+        self.ab_roi_checks_layout.setContentsMargins(0, 0, 0, 0)
+        self.ab_roi_checks_layout.setSpacing(6)
+        self.ab_roi_empty = QLabel('Select ROIs on the image.\nCheck a ROI to show its mean spectrum.')
+        self.ab_roi_empty.setWordWrap(True)
+        self.ab_roi_checks_layout.addWidget(self.ab_roi_empty)
+        self.ab_roi_checks_layout.addStretch(1)
+        self.ab_rois_scroll = QScrollArea()
+        self.ab_rois_scroll.setWidgetResizable(True)
+        self.ab_rois_scroll.setMinimumHeight(115)
+        self.ab_rois_scroll.setWidget(self.ab_roi_checks_container)
+        roi_layout.addWidget(self.ab_rois_scroll)
+        legend_layout.addWidget(self.ab_rois_group, 1)
 
         image_panel = QVBoxLayout()
         zoom_row = QHBoxLayout()
@@ -325,6 +353,7 @@ class OverlayMixin:
         self.ab_view_label.setStyleSheet("QLabel { background:#111; border:1px solid #333; }")
         image_panel.addWidget(self.ab_view_label, 1)
         main.addLayout(image_panel, 4)
+        main.addWidget(legend_widget, 0)
         self.ab_zoom_out.clicked.connect(lambda: self.ab_view_label.zoom_by(1/1.25))
         self.ab_zoom_in.clicked.connect(lambda: self.ab_view_label.zoom_by(1.25))
         self.ab_zoom_fit.clicked.connect(self.ab_view_label.reset_view)
@@ -334,7 +363,7 @@ class OverlayMixin:
         right = QVBoxLayout()
         right.setSpacing(6)
 
-        lbl = QLabel("<b>Spectrum · pixel and class reference</b>")
+        lbl = QLabel("<b>Spectrum · pixel, class and selected ROIs</b>")
         right.addWidget(lbl, 0)
         help_label = QLabel("Move over the image to explore. Click to hold a point.")
         help_label.setWordWrap(True)
@@ -426,28 +455,48 @@ class OverlayMixin:
             bbox=dict(boxstyle='round,pad=.4',facecolor='#252525',edgecolor='#ffd166',alpha=.95))
         self._ab_spectrum_annotation.set_visible(False)
 
-        def _hide_spectrum_cursor(_event=None):
-            if self._ab_spectrum_annotation.get_visible():
+        self._ab_spectrum_pin_line = ax.axvline(0, color='#ffd166', linestyle=':',
+                                               linewidth=1, visible=False, label='_nolegend_')
+        canvas.setToolTip('Hover over the spectrum to read a band. Left click: pin its wavelength while exploring the image. Click again in the plot to unpin.')
+
+        def _hide_spectrum_cursor(_event=None, *, force=False):
+            if self._ab_spectrum_pinned_wavelength is not None and not force:
+                return
+            if self._ab_spectrum_annotation.get_visible() or self._ab_spectrum_pin_line.get_visible():
                 self._ab_spectrum_annotation.set_visible(False)
                 self._ab_spectrum_cursor.set_data([],[])
+                self._ab_spectrum_pin_line.set_visible(False)
                 canvas.draw_idle()
 
-        def _hover_spectrum(event):
-            if event.inaxes is not self._ab_spec_ax or event.xdata is None:
-                _hide_spectrum_cursor()
-                return
+        def _show_spectrum_cursor(target, *, pinned=False):
             x = np.asarray(self._ab_spec_line.get_xdata(),dtype=float)
             y = np.asarray(self._ab_spec_line.get_ydata(),dtype=float)
-            valid = np.flatnonzero(np.isfinite(x) & np.isfinite(y))
+            if not x.size and self._ab_cube is not None:
+                x = _band_to_wl(self._ab_cube.shape[2])
+                context = self._ab_spectrum_context
+                if classification_visible and self.ab_spectrum_normalization.currentData() == 'model' and context:
+                    x = x[context['indices']]
+                y = np.full(x.shape, np.nan)
+            valid = np.flatnonzero(np.isfinite(x))
             if not len(valid):
-                _hide_spectrum_cursor()
-                return
-            index = valid[np.argmin(np.abs(x[valid]-event.xdata))]
+                _hide_spectrum_cursor(force=True)
+                return None
+            index = valid[np.argmin(np.abs(x[valid]-target))]
+            # A model-normalized view may omit the pinned band. Never silently
+            # move the pin to a different wavelength; restore it when available.
+            if pinned and not np.isclose(x[index], target, rtol=0, atol=1e-6):
+                _hide_spectrum_cursor(force=True)
+                return None
             wavelength, intensity = float(x[index]), float(y[index])
-            self._ab_spectrum_cursor.set_data([wavelength],[intensity])
+            available = np.isfinite(intensity)
+            self._ab_spectrum_cursor.set_data([wavelength] if available else [],
+                                              [intensity] if available else [])
+            self._ab_spectrum_pin_line.set_xdata([wavelength, wavelength])
+            self._ab_spectrum_pin_line.set_visible(pinned)
             annotation = self._ab_spectrum_annotation
-            annotation.xy = (wavelength,intensity)
-            normalized = classification_visible and self.ab_spectrum_normalization.currentData() == 'model'
+            ylo,yhi = ax.get_ylim()
+            annotation.xy = (wavelength, intensity if available else (ylo+yhi)/2)
+            normalized = self.ab_spectrum_normalization.currentData() == 'model'
             context = getattr(self,'_ab_spectrum_context',None)
             mode = context['mode'] if normalized and context else 'raw'
             if not classification_visible:
@@ -455,7 +504,8 @@ class OverlayMixin:
             if mode == 'snv_three_ratios':
                 mode = 'SNV (3-ratio model)'
             unit = 'nm' if self._ab_wavelengths is not None else '(band)'
-            annotation.set_text(f'{wavelength:g} {unit}\nIntensity: {intensity:.5g} · {mode}')
+            value = f'{intensity:.5g}' if available else 'unavailable'
+            annotation.set_text(f'{"Pinned · " if pinned else ""}{wavelength:g} {unit}\nIntensity: {value} · {mode}')
             xlo,xhi = ax.get_xlim();ylo,yhi = ax.get_ylim()
             left = wavelength > xlo+.65*(xhi-xlo)
             below = intensity > ylo+.7*(yhi-ylo)
@@ -464,8 +514,33 @@ class OverlayMixin:
             annotation.set_va('top' if below else 'bottom')
             annotation.set_visible(True)
             canvas.draw_idle()
+            return wavelength
+
+        def _hover_spectrum(event):
+            if self._ab_spectrum_pinned_wavelength is not None:
+                return
+            if event.inaxes is not self._ab_spec_ax or event.xdata is None:
+                _hide_spectrum_cursor()
+                return
+            _show_spectrum_cursor(event.xdata)
+
+        def _click_spectrum(event):
+            if event.button != 1 or event.inaxes is not self._ab_spec_ax:
+                return
+            toolbar = getattr(canvas, 'toolbar', None)
+            if toolbar is not None and toolbar.mode:
+                return
+            if self._ab_spectrum_pinned_wavelength is not None:
+                self._ab_spectrum_pinned_wavelength = None
+                _hide_spectrum_cursor(force=True)
+            elif event.xdata is not None:
+                wavelength = _show_spectrum_cursor(event.xdata)
+                if wavelength is not None:
+                    self._ab_spectrum_pinned_wavelength = wavelength
+                    _show_spectrum_cursor(wavelength, pinned=True)
 
         canvas.mpl_connect('motion_notify_event',_hover_spectrum)
+        canvas.mpl_connect('button_press_event',_click_spectrum)
         canvas.mpl_connect('axes_leave_event',_hide_spectrum_cursor)
         canvas.mpl_connect('figure_leave_event',_hide_spectrum_cursor)
 
@@ -804,8 +879,85 @@ class OverlayMixin:
             y = max(0, min(H - 1, y))
             return x, y
 
+        roi_colors = ('#56b4e9', '#e69f00', '#009e73', '#cc79a7', '#f0e442', '#d55e00', '#88ccee', '#ee6677')
+
+        def _sync_roi_spectrum_checks():
+            rois = {roi['id']: roi for roi in self._data_rois}
+            changed = False
+            for roi_id in list(self.ab_roi_checks):
+                if roi_id not in rois or self._ab_roi_records.get(roi_id) is not rois[roi_id]:
+                    checkbox = self.ab_roi_checks.pop(roi_id)
+                    self.ab_roi_checks_layout.removeWidget(checkbox)
+                    checkbox.deleteLater()
+                    self._ab_roi_records.pop(roi_id, None)
+                    self._ab_roi_lines.pop(roi_id).remove()
+                    changed = True
+            for i, (roi_id, roi) in enumerate(rois.items()):
+                if roi_id in self.ab_roi_checks:
+                    continue
+                color = (roi_colors[i] if i < len(roi_colors) else
+                         QColor.fromHsvF((i * 0.61803398875) % 1, .65, .95).name())
+                checkbox = QCheckBox(f"{roi_id} · {len(roi['coordinates_xy']):,} px")
+                checkbox.setToolTip(f"{roi_id} ({roi['shape']}) — mean of displayed pixel spectra; alpha 0.70.")
+                checkbox.setStyleSheet(f'QCheckBox {{ color: {color}; }}')
+                checkbox.setChecked(False)
+                self.ab_roi_checks_layout.insertWidget(self.ab_roi_checks_layout.count()-1, checkbox)
+                self.ab_roi_checks[roi_id] = checkbox
+                self._ab_roi_records[roi_id] = roi
+                (line,) = ax.plot([], [], color=color, alpha=.70, linewidth=1.6,
+                                  label=f'{roi_id} mean', visible=False, zorder=2)
+                self._ab_roi_lines[roi_id] = line
+                checkbox.toggled.connect(lambda _checked: _refresh_spectrum())
+                changed = True
+            self.ab_roi_empty.setVisible(not rois)
+            if changed:
+                self._ab_roi_spectrum_cache.clear()
+                _refresh_spectrum()
+
+        self._sync_roi_spectrum_checks = _sync_roi_spectrum_checks
+
+        def _update_roi_spectra():
+            """Mean AFTER per-pixel transformation, matching the hovered spectrum."""
+            bounds = []
+            cube = self._ab_cube
+            mode = self.ab_spectrum_normalization.currentData() if classification_visible else self.display_normalization.currentData()
+            context = getattr(self, '_ab_spectrum_context', None)
+            indices = tuple(context['indices']) if mode == 'model' and context else None
+            transform = context['mode'] if indices is not None else mode
+            for roi_id, line in self._ab_roi_lines.items():
+                show = cube is not None and cube is self._data_cube and self.ab_roi_checks[roi_id].isChecked()
+                line.set_visible(show)
+                if not show:
+                    continue
+                key = (id(cube), roi_id, transform, indices)
+                if key not in self._ab_roi_spectrum_cache:
+                    coordinates = np.asarray(self._ab_roi_records[roi_id]['coordinates_xy'], dtype=int)
+                    wl = _band_to_wl(cube.shape[2])
+                    if indices is not None:
+                        wl = wl[list(indices)]
+                    total = np.zeros(len(wl), dtype=float)
+                    counts = np.zeros(len(wl), dtype=int)
+                    for start in range(0, len(coordinates), 8192):
+                        xy = coordinates[start:start+8192]
+                        values = np.asarray(cube[xy[:, 1], xy[:, 0], :])
+                        if indices is not None:
+                            values = values[:, list(indices)]
+                        if indices is not None:
+                            values = normalize_spectra(values, transform)
+                        elif transform in ('log_reflectance', 'snv', 'minmax'):
+                            values = normalize_display_block(values, transform)
+                        valid = np.isfinite(values)
+                        total += np.where(valid, values, 0).sum(axis=0, dtype=float)
+                        counts += valid.sum(axis=0)
+                    mean = np.divide(total, counts, out=np.full(len(wl), np.nan), where=counts > 0)
+                    self._ab_roi_spectrum_cache[key] = wl, mean
+                wl, mean = self._ab_roi_spectrum_cache[key]
+                line.set_data(wl, mean)
+                bounds.append(mean)
+            return bounds
+
         def _clear_spectrum():
-            _hide_spectrum_cursor()
+            _hide_spectrum_cursor(force=True)
             self._ab_spec_line.set_data([], [])
             self._ab_ref_line.set_data([], [])
             if self._ab_ref_band is not None:
@@ -834,7 +986,6 @@ class OverlayMixin:
             refs = self._ab_references
             wl = _band_to_wl(bands)
             if normalized:
-                from shared.spectrum_normalization import normalize_spectra
                 indices = context['indices']
                 patch = normalize_spectra(patch.reshape(-1,bands)[:,indices],context['mode']).reshape(*patch.shape[:2],len(indices))
                 bands = len(indices)
@@ -847,7 +998,6 @@ class OverlayMixin:
             display_mode = 'none' if classification_visible else self.display_normalization.currentData()
             manual = display_mode in ('snv', 'minmax', 'log_reflectance')
             if manual:
-                from shared.spectrum_normalization import normalize_display_block
                 patch = normalize_display_block(patch, self.display_normalization.currentData())
             finite = np.isfinite(patch)
             counts = finite.sum(axis=(0, 1))
@@ -909,11 +1059,20 @@ class OverlayMixin:
                     bounds.extend([low, high])
             else:
                 self.ab_reference_info.setText("No classification applied." if self._ab_abund is None else "No usable class reference at this point.\nZero, tied or invalid class values are left unassigned.")
+            bounds.extend(_update_roi_spectra())
+            _finish_spectrum_plot(bounds, wl, normalized, manual, display_mode)
+            if self._ab_spectrum_pinned_wavelength is not None:
+                _show_spectrum_cursor(self._ab_spectrum_pinned_wavelength, pinned=True)
+            self._ab_spec_canvas.draw_idle()
+
+        def _finish_spectrum_plot(bounds, wl, normalized, manual, display_mode):
+            cube = self._ab_cube
+            h = cube.shape[0]
             if len(wl) > 1:
                 ax.set_xlim(float(wl[0]), float(wl[-1]))
             else:
                 ax.set_xlim(float(wl[0]) - .5, float(wl[0]) + .5)
-            values = np.concatenate(bounds)
+            values = np.concatenate(bounds) if bounds else np.array([])
             values = values[np.isfinite(values)]
             if values.size:
                 lo, hi = float(values.min()), float(values.max())
@@ -937,6 +1096,7 @@ class OverlayMixin:
                             self._spectrum_display_limits[display_mode] = (lower, upper)
                         lo, hi = self._spectrum_display_limits[display_mode]
                     elif normalized:
+                        refs = self._ab_normalized_refs or {}
                         all_bounds = np.concatenate([np.r_[ref['mean']-ref['std'],ref['mean']+ref['std']] for ref in refs.values()]) if refs else values
                         lo, hi = float(np.nanmin(all_bounds)), float(np.nanmax(all_bounds))
                     else:
@@ -951,18 +1111,36 @@ class OverlayMixin:
                     upper = min(upper, 2.0)
                 lower = 0. if self.cb_ab_fixed_axes.isChecked() and display_mode == 'log_reflectance' and lo == 0 else lo-pad
                 ax.set_ylim(lower, upper)
-            handles = [self._ab_spec_line]
+            handles = [self._ab_spec_line] if len(self._ab_spec_line.get_xdata()) else []
             if self._ab_ref_band is not None:
                 handles.extend([self._ab_ref_line, self._ab_ref_band])
+            handles.extend(line for line in self._ab_roi_lines.values() if line.get_visible())
+            if not handles:
+                return
             legend = ax.legend(handles=handles, loc="best", fontsize=8,
                                facecolor="#2b2b2b", edgecolor="#555555")
             for text in legend.get_texts():
                 text.set_color("#f0f0f0")
-            self._ab_spec_canvas.draw_idle()
 
         def _refresh_spectrum():
             if self._ab_hover_xy is not None:
                 _plot_spectrum_at(*self._ab_hover_xy)
+            else:
+                _clear_spectrum()
+                bounds = _update_roi_spectra()
+                if self._ab_cube is not None:
+                    spectrum_mode = self.ab_spectrum_normalization.currentData() if classification_visible else self.display_normalization.currentData()
+                    context = getattr(self, '_ab_spectrum_context', None)
+                    normalized = spectrum_mode == 'model' and context is not None
+                    manual = spectrum_mode in ('log_reflectance', 'snv', 'minmax')
+                    wl = _band_to_wl(self._ab_cube.shape[2])
+                    if normalized:
+                        wl = wl[context['indices']]
+                    ax.set_title('Selected ROI mean spectra' if bounds else empty_spectrum_title)
+                    ax.set_ylabel('Normalized spectral value' if normalized or manual else 'Signal (native cube values)')
+                    ax.set_xlabel('Wavelength (nm)' if self._ab_wavelengths is not None else 'Band index')
+                    _finish_spectrum_plot(bounds, wl, normalized, manual, spectrum_mode)
+                self._ab_spec_canvas.draw_idle()
 
         def _resume_hover():
             self._ab_pinned = False
@@ -1106,6 +1284,7 @@ class OverlayMixin:
             self.ab_decision_status.setText("Platt probabilities unavailable — rerun classification with a calibrated model.")
             self._ab_pinned = False
             self.ab_resume_hover.setEnabled(False)
+            self._ab_spectrum_pinned_wavelength = None
             self._ab_hover_xy = None
             self._ab_class_map = None
             self._ab_references = {}
@@ -1503,6 +1682,7 @@ class OverlayMixin:
             self._ab_references = {}
             self._ab_spectrum_context = self._ab_normalized_refs = None
             self._ab_pinned = False
+            self._ab_spectrum_pinned_wavelength = None
             self._ab_hover_xy = None
             self.ab_resume_hover.setEnabled(False)
             self.ab_spectrum_normalization.setCurrentIndex(0)
